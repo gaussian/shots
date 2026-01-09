@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import pathlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import yaml  # type: ignore
@@ -15,21 +15,21 @@ except Exception:
 class ShotSpec:
     id: str
     description: str
-    url: Optional[str] = None  # absolute or relative
-    viewport_preset: Optional[str] = None
-    viewport: Optional[Dict[str, int]] = None  # width/height/scale
-    full_page: Optional[bool] = None
+    url: str | None = None  # absolute or relative
+    viewport_preset: str | None = None
+    viewport: dict[str, int] | None = None  # width/height/scale
+    full_page: bool | None = None
 
 
 @dataclass
 class RunConfig:
     base_url: str
     start: str
-    defaults: Dict[str, Any]
-    shots: List[ShotSpec]
+    defaults: dict[str, Any]
+    shots: list[ShotSpec]
 
 
-def _require_str(obj: Dict[str, Any], key: str) -> str:
+def _require_str(obj: dict[str, Any], key: str) -> str:
     if key not in obj or not isinstance(obj[key], str) or not obj[key].strip():
         raise ValueError(f"Missing/invalid required string: {key}")
     return obj[key].strip()
@@ -59,7 +59,7 @@ def load_config(path: str) -> RunConfig:
     if not isinstance(shots_raw, list) or not shots_raw:
         raise ValueError("shots must be a non-empty list.")
 
-    shots: List[ShotSpec] = []
+    shots: list[ShotSpec] = []
     for idx, s in enumerate(shots_raw):
         if not isinstance(s, dict):
             raise ValueError(f"shots[{idx}] must be an object.")

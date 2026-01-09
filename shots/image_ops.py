@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Optional, Tuple
 
 from PIL import Image
 
@@ -62,6 +61,6 @@ def crop_png(png_bytes: bytes, crop: Crop) -> bytes:
     return buf.getvalue()
 
 
-def get_png_size(png_bytes: bytes) -> Tuple[int, int]:
+def get_png_size(png_bytes: bytes) -> tuple[int, int]:
     im = Image.open(BytesIO(png_bytes))
     return im.size

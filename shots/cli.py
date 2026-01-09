@@ -6,7 +6,7 @@ import sys
 
 from .config import load_config
 from .runner import login_manual, run_config
-from .viewport import VIEWPORT_PRESETS, viewport_from_preset, viewport_from_values
+from .viewport import VIEWPORT_PRESETS, viewport_from_values
 
 
 def _add_common_run_flags(p: argparse.ArgumentParser) -> None:
@@ -41,8 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_cfg.add_argument("--config", required=True)
     _add_common_run_flags(p_cfg)
 
-    p_cfg.add_argument("--viewport", choices=VIEWPORT_PRESETS.keys(), default="desktop",
-                       help="Fallback viewport if not set in config.")
+    p_cfg.add_argument(
+        "--viewport", choices=VIEWPORT_PRESETS.keys(), default="desktop", help="Fallback viewport if not set in config."
+    )
     p_cfg.add_argument("--viewport-w", type=int)
     p_cfg.add_argument("--viewport-h", type=int)
     p_cfg.add_argument("--scale", type=int)
@@ -52,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_cli_viewport(args) -> "tuple[int,int,int,bool]":
+def _resolve_cli_viewport(args) -> tuple[int, int, int, bool]:
     # If explicit width/height/scale provided, prefer that; else preset.
     if args.viewport_w and args.viewport_h:
         scale = args.scale if args.scale else VIEWPORT_PRESETS.get(args.viewport, {}).get("scale", 2)

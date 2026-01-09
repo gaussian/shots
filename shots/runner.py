@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import urljoin
 
-from playwright.sync_api import BrowserContext, Page, sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 from .config import RunConfig, ShotSpec
 from .image_ops import Crop, clamp_crop, crop_png, downscale_png, get_png_size
@@ -18,7 +18,7 @@ def _ensure_dir(p: pathlib.Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
-def _resolve_viewport_for_shot(defaults: Dict[str, Any], shot: ShotSpec, fallback: Viewport) -> Viewport:
+def _resolve_viewport_for_shot(defaults: dict[str, Any], shot: ShotSpec, fallback: Viewport) -> Viewport:
     full_page = shot.full_page if shot.full_page is not None else bool(defaults.get("full_page", fallback.full_page))
 
     if shot.viewport:
@@ -131,7 +131,7 @@ def _execute_action(page: Page, action: Any, timeout_ms: int) -> StepOutcome:
         return StepOutcome(ok=False, error=repr(e))
 
 
-def _pick_carry_note(history: List[Dict[str, Any]]) -> str:
+def _pick_carry_note(history: list[dict[str, Any]]) -> str:
     for h in reversed(history):
         act = h.get("action") or {}
         np = act.get("next_prompt")
@@ -173,9 +173,10 @@ def run_config(
     client = None
     if use_llm:
         from .llm import make_openai_client
+
         client = make_openai_client()
 
-    report: Dict[str, Any] = {"base_url": cfg.base_url, "shots": [], "config": None}
+    report: dict[str, Any] = {"base_url": cfg.base_url, "shots": [], "config": None}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
@@ -191,9 +192,9 @@ def run_config(
             )
             page = context.new_page()
 
-            shot_history: List[Dict[str, Any]] = []
+            shot_history: list[dict[str, Any]] = []
             final_url = ""
-            output_path: Optional[pathlib.Path] = None
+            output_path: pathlib.Path | None = None
 
             try:
                 # Choose initial URL: shot.url else config.start
@@ -310,7 +311,12 @@ def run_config(
                         "status": "ok",
                         "output": str(output_path),
                         "final_url": final_url,
-                        "viewport": {"width": vp.width, "height": vp.height, "scale": vp.scale, "full_page": vp.full_page},
+                        "viewport": {
+                            "width": vp.width,
+                            "height": vp.height,
+                            "scale": vp.scale,
+                            "full_page": vp.full_page,
+                        },
                         "history_tail": shot_history[-25:],
                     }
                 )

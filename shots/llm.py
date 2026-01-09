@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .image_ops import b64_png, Crop
+from .image_ops import Crop, b64_png
 from .utils import is_http_url, same_origin
 
 
 def llm_available() -> bool:
     try:
         import openai  # noqa: F401
+
         return True
     except Exception:
         return False
@@ -18,6 +19,7 @@ def llm_available() -> bool:
 
 def make_openai_client() -> Any:
     from openai import OpenAI  # type: ignore
+
     return OpenAI()
 
 
@@ -26,26 +28,27 @@ class NavAction:
     """
     Single step per loop; may include repeat for "click 3 times".
     """
+
     type: str  # goto | click_role | click_text | type_text | press_key | scroll | wait | done | fail
     reason: str = ""
 
-    url: Optional[str] = None
-    ms: Optional[int] = None
+    url: str | None = None
+    ms: int | None = None
 
-    role: Optional[str] = None
-    name: Optional[str] = None
-    text: Optional[str] = None
-    nth: Optional[int] = None
+    role: str | None = None
+    name: str | None = None
+    text: str | None = None
+    nth: int | None = None
 
     repeat: int = 1
 
-    selector: Optional[str] = None
-    input_text: Optional[str] = None
+    selector: str | None = None
+    input_text: str | None = None
 
-    key: Optional[str] = None
-    scroll_y: Optional[int] = None
+    key: str | None = None
+    scroll_y: int | None = None
 
-    next_prompt: Optional[str] = None
+    next_prompt: str | None = None
 
 
 def _parse_action(raw: str) -> NavAction:
@@ -77,7 +80,7 @@ def next_action_for_shot(
     goal_description: str,
     preview_png_bytes: bytes,
     step_index: int,
-    history: List[Dict[str, Any]],
+    history: list[dict[str, Any]],
     carry_note: str = "",
 ) -> NavAction:
     """
@@ -152,7 +155,7 @@ def pick_crop(
     preview_png_bytes: bytes,
     preview_w: int,
     preview_h: int,
-) -> Optional[Crop]:
+) -> Crop | None:
     """
     Vision model chooses a crop rectangle on the preview image.
     Returns None if it decides the page is not presentable.

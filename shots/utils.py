@@ -4,8 +4,8 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
-from urllib.parse import urlparse, urldefrag
+from typing import Any
+from urllib.parse import urldefrag, urlparse
 
 
 def now_ts() -> str:
@@ -16,7 +16,7 @@ def safe_filename(name: str, max_len: int = 120) -> str:
     name = (name or "").strip().lower()
     name = re.sub(r"[^a-z0-9\-_.]+", "-", name)
     name = re.sub(r"-{2,}", "-", name).strip("-")
-    return (name[:max_len] or "shot")
+    return name[:max_len] or "shot"
 
 
 def normalize_url(url: str) -> str:
@@ -45,5 +45,5 @@ def compact_json(obj: Any) -> str:
 @dataclass
 class StepOutcome:
     ok: bool
-    error: Optional[str] = None
-    extra: Optional[Dict[str, Any]] = None
+    error: str | None = None
+    extra: dict[str, Any] | None = None

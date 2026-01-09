@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
 
-
-VIEWPORT_PRESETS: Dict[str, Dict[str, int | bool]] = {
+VIEWPORT_PRESETS: dict[str, dict[str, int | bool]] = {
     "desktop": {"width": 1920, "height": 1080, "scale": 2, "full_page": True},
     "laptop": {"width": 1440, "height": 900, "scale": 2, "full_page": True},
     "tablet": {"width": 834, "height": 1112, "scale": 2, "full_page": True},
@@ -20,7 +18,7 @@ class Viewport:
     full_page: bool
 
 
-def viewport_from_preset(preset: str, full_page_override: Optional[bool] = None) -> Viewport:
+def viewport_from_preset(preset: str, full_page_override: bool | None = None) -> Viewport:
     vp = VIEWPORT_PRESETS.get(preset)
     if not vp:
         raise ValueError(f"Unknown viewport preset: {preset}")
