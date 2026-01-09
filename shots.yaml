@@ -1,0 +1,19 @@
+base_url: https://your-app.example.com
+start: /app
+
+defaults:
+  viewport_preset: desktop
+  full_page: true
+  max_nav_steps: 12
+
+shots:
+  - id: dashboard-hero
+    url: /app/dashboard
+    description: >
+      Capture the main dashboard with KPI cards and a chart visible.
+      Close any modal, cookie banner, or tour overlay. If needed, use the left nav to reach Dashboard.
+  - id: wizard-step-4
+    description: >
+      Open the onboarding wizard and click the red button 3 times to reach step 4 summary,
+      then stop when the summary screen is visible and presentable.
+    viewport_preset: laptop
