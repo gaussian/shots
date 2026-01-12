@@ -19,7 +19,7 @@ jobs:
     steps:
 
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0 # otherwise, there would be errors pushing refs to the destination repository.
@@ -129,7 +129,7 @@ jobs:
           generate_release_notes: true
 
       - name: Checkout the merged development branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.head_ref }} # This is the branch that was merged into main
           fetch-depth: 0 # Fetch all history for all branches and tags
