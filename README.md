@@ -14,6 +14,15 @@ pip install -e ".[llm,yaml]"
 playwright install chromium
 ```
 
+## Setup
+
+```bash
+cp shots.yaml.example shots.yaml   # edit with your app's URL and shots
+cp .env.example .env                # add your OPENAI_API_KEY
+```
+
+Both `shots.yaml` and `.env` are gitignored.
+
 ## 1) One-time manual login
 
 ```bash

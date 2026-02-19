@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 from typing import Any
 from urllib.parse import urljoin
 
@@ -56,8 +57,13 @@ def login_manual(base_url: str, out_dir: pathlib.Path, viewport: Viewport) -> pa
         print("1) A browser window opened.")
         print("2) Log into your app manually.")
         print("3) Navigate to any page that proves you're logged in.")
-        print("4) Return here and press ENTER.\n")
-        input("Press ENTER when you are fully logged in... ")
+
+        if sys.stdin.isatty():
+            print("4) Return here and press ENTER.\n")
+            input("Press ENTER when you are fully logged in... ")
+        else:
+            print('4) Click the ▶ (Resume) button in the Playwright inspector when done.\n')
+            page.pause()
 
         context.storage_state(path=str(state_path))
         print(f"Saved auth state: {state_path}")

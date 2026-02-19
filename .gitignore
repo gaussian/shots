@@ -206,7 +206,8 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# shots outputs
+# shots config & outputs
+shots.yaml
 shots_out/
 report.json
 storage_state.json
