@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 import sys
 from typing import Any
@@ -13,6 +14,24 @@ from .image_ops import Crop, clamp_crop, crop_png, downscale_png, get_png_size
 from .stability import wait_until_stable
 from .utils import StepOutcome, normalize_url, now_ts, safe_filename, same_origin
 from .viewport import Viewport, viewport_from_preset, viewport_from_values
+
+log = logging.getLogger("shots")
+
+
+def _configure_logging(out_dir: pathlib.Path) -> None:
+    root = logging.getLogger("shots")
+    root.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s %(levelname)-5s %(name)s  %(message)s", datefmt="%H:%M:%S")
+
+    fh = logging.FileHandler(out_dir / "shots.log", mode="w", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+
+    sh = logging.StreamHandler(sys.stderr)
+    sh.setLevel(logging.INFO)
+    sh.setFormatter(fmt)
+    root.addHandler(sh)
 
 
 def _ensure_dir(p: pathlib.Path) -> None:
@@ -74,19 +93,22 @@ def login_manual(base_url: str, out_dir: pathlib.Path, viewport: Viewport) -> pa
     return state_path
 
 
-def _execute_action(page: Page, action: Any, timeout_ms: int) -> StepOutcome:
+def _execute_action(page: Page, action: Any, timeout_ms: int, nav_timeout_ms: int | None = None) -> StepOutcome:
     """
     Executes one action with optional repeat. Returns StepOutcome (ok/error).
-    Action is expected to be llm.NavAction.
+    timeout_ms: used for element interactions (clicks, typing). Should be short (fail fast).
+    nav_timeout_ms: used for page.goto navigation. Falls back to timeout_ms if not given.
     """
     from .llm import NavAction  # local import to keep deps clean
+
+    _nav_timeout = nav_timeout_ms or timeout_ms
 
     if not isinstance(action, NavAction):
         return StepOutcome(ok=False, error="Invalid action type.")
 
     def do_once() -> None:
         if action.type == "goto" and action.url:
-            page.goto(action.url, wait_until="domcontentloaded", timeout=timeout_ms)
+            page.goto(action.url, wait_until="domcontentloaded", timeout=_nav_timeout)
             return
 
         if action.type == "click_role" and action.role and action.name:
@@ -160,6 +182,7 @@ def run_config(
     out_dir: pathlib.Path,
     *,
     timeout_ms: int,
+    action_timeout_ms: int = 5_000,
     headed: bool,
     use_llm: bool,
     model: str,
@@ -172,15 +195,20 @@ def run_config(
     If use_llm: LLM drives multi-step actions until it returns done.
     """
     _ensure_dir(out_dir)
+    _configure_logging(out_dir)
+
     state_path = _auth_state_path(out_dir)
     if not state_path.exists():
         raise RuntimeError(f"Missing {state_path}. Run: shots login --base-url {cfg.base_url} --out-dir {out_dir}")
+
+    log.info("run_config: base_url=%s shots=%d use_llm=%s model=%s timeout=%dms action_timeout=%dms", cfg.base_url, len(cfg.shots), use_llm, model, timeout_ms, action_timeout_ms)
 
     client = None
     if use_llm:
         from .llm import make_openai_client
 
         client = make_openai_client()
+        log.info("OpenAI client created")
 
     report: dict[str, Any] = {"base_url": cfg.base_url, "shots": [], "config": None}
 
@@ -188,6 +216,7 @@ def run_config(
         browser = p.chromium.launch(headless=not headed)
 
         for idx, shot in enumerate(cfg.shots, start=1):
+            log.info("--- shot %d/%d: %s ---", idx, len(cfg.shots), shot.id)
             vp = _resolve_viewport_for_shot(cfg.defaults, shot, cli_fallback_viewport)
 
             # New context per shot so scale can vary.
@@ -208,7 +237,9 @@ def run_config(
                 start_url = _absolutize(cfg.base_url, start)
                 start_url = normalize_url(start_url)
 
+                log.info("goto %s", start_url)
                 page.goto(start_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                log.info("initial page loaded, waiting for stability")
                 wait_until_stable(page, timeout_ms=timeout_ms)
 
                 max_steps = int(cfg.defaults.get("max_nav_steps", 12))
@@ -218,21 +249,22 @@ def run_config(
 
                 acquired = False
                 for step_i in range(1, max_steps + 1):
+                    log.info("step %d/%d: waiting for stability", step_i, max_steps)
                     wait_until_stable(page, timeout_ms=timeout_ms)
 
-                    # Source screenshot (for eventual crop & debugging)
+                    log.debug("taking screenshot for LLM")
                     source_png = page.screenshot(full_page=vp.full_page)
-
-                    # Downscale for LLM
                     preview_png, pw, ph, scale = downscale_png(source_png, max_w=1000)
 
                     if not use_llm:
                         acquired = True
                         break
 
-                    from .llm import next_action_for_shot
+                    from .llm import next_action_for_shot, _action_signature, failed_signatures
 
                     carry_note = _pick_carry_note(shot_history)
+                    prev_failed = failed_signatures(shot_history)
+                    log.info("step %d/%d: calling LLM", step_i, max_steps)
                     action = next_action_for_shot(
                         client=client,
                         model=model,
@@ -245,8 +277,26 @@ def run_config(
                         carry_note=carry_note,
                     )
 
+                    # Dedup: if the LLM proposed an action identical to one that already failed, re-query once.
+                    sig = _action_signature(action)
+                    if sig in prev_failed and action.type not in ("done", "fail", "wait", "scroll"):
+                        log.warning("step %d/%d: LLM repeated a failed action (%s), re-querying", step_i, max_steps, action.type)
+                        action = next_action_for_shot(
+                            client=client,
+                            model=model,
+                            base_url=cfg.base_url,
+                            current_url=page.url,
+                            goal_description=shot.description,
+                            preview_png_bytes=preview_png,
+                            step_index=step_i,
+                            history=shot_history,
+                            carry_note="Your previous suggestion was IDENTICAL to an action that already failed. You MUST pick a different approach.",
+                        )
+
+                    log.info("step %d/%d: executing action type=%s reason=%s", step_i, max_steps, action.type, action.reason[:80] if action.reason else "")
                     url_before = page.url
-                    outcome = _execute_action(page, action, timeout_ms=timeout_ms)
+                    outcome = _execute_action(page, action, timeout_ms=action_timeout_ms, nav_timeout_ms=timeout_ms)
+                    log.info("step %d/%d: action result ok=%s error=%s", step_i, max_steps, outcome.ok, outcome.error or "")
                     wait_until_stable(page, timeout_ms=timeout_ms)
 
                     shot_history.append(
@@ -261,6 +311,7 @@ def run_config(
 
                     if action.type == "done":
                         acquired = True
+                        log.info("LLM says done")
                         break
                     if action.type == "fail":
                         raise RuntimeError(f"LLM failed: {action.reason}")
@@ -269,6 +320,7 @@ def run_config(
                     raise RuntimeError(f"Failed to acquire shot within {max_steps} steps.")
 
                 # Final capture (stable)
+                log.info("final capture")
                 wait_until_stable(page, timeout_ms=timeout_ms)
                 final_source = page.screenshot(full_page=vp.full_page)
                 final_url = page.url
@@ -288,6 +340,7 @@ def run_config(
                 if use_llm and use_llm_crop:
                     from .llm import pick_crop
 
+                    log.info("requesting LLM crop")
                     preview_png, pw, ph, sc = downscale_png(final_source, max_w=1000)
                     crop = pick_crop(
                         client=client,
@@ -327,10 +380,12 @@ def run_config(
                     }
                 )
 
+                log.info("[OK] %s -> %s", shot.id, output_path)
                 print(f"[OK] {shot.id} -> {output_path}")
 
             except Exception as e:
-                report["shots"].append({"id": shot.id, "status": "error", "error": str(e), "final_url": final_url})
+                log.error("[ERROR] %s: %s", shot.id, e)
+                report["shots"].append({"id": shot.id, "status": "error", "error": str(e), "final_url": final_url, "history_tail": shot_history[-25:]})
                 print(f"[ERROR] {shot.id}: {e}")
 
             finally:
@@ -340,4 +395,6 @@ def run_config(
 
     report_path = out_dir / "report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    log.info("Report written to %s", report_path)
+    log.info("Log written to %s", out_dir / "shots.log")
     return report_path

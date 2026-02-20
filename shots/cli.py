@@ -12,10 +12,11 @@ from .viewport import VIEWPORT_PRESETS, viewport_from_values
 def _add_common_run_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--out-dir", default="shots_out")
     p.add_argument("--headed", action="store_true", help="Show the browser (debug).")
-    p.add_argument("--timeout-ms", type=int, default=45_000)
+    p.add_argument("--timeout-ms", type=int, default=10_000, help="Page-load/navigation timeout.")
+    p.add_argument("--action-timeout-ms", type=int, default=5_000, help="Timeout for clicks/typing (fail fast).")
 
     p.add_argument("--use-llm", action="store_true", help="Enable LLM multi-step navigation to acquire each shot.")
-    p.add_argument("--model", default="gpt-4.1")
+    p.add_argument("--model", default="gpt-5.2")
     p.add_argument("--use-llm-crop", action="store_true", help="Use LLM to choose a crop box.")
     p.add_argument("--save-source", action="store_true", help="Save uncropped source images too.")
 
@@ -86,6 +87,7 @@ def cmd_run_config(args) -> None:
         cfg=cfg,
         out_dir=out_dir,
         timeout_ms=args.timeout_ms,
+        action_timeout_ms=args.action_timeout_ms,
         headed=args.headed,
         use_llm=args.use_llm,
         model=args.model,

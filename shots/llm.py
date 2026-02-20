@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from .image_ops import Crop, b64_png
 from .utils import is_http_url, same_origin
+
+log = logging.getLogger("shots.llm")
 
 
 def llm_available() -> bool:
@@ -72,6 +76,51 @@ def _parse_action(raw: str) -> NavAction:
     )
 
 
+def _summarize_failures(history: list[dict[str, Any]]) -> str:
+    """Build a short summary of failed actions so the LLM doesn't repeat them."""
+    lines: list[str] = []
+    for h in history:
+        outcome = h.get("outcome") or {}
+        if outcome.get("ok"):
+            continue
+        act = h.get("action") or {}
+        t = act.get("type", "?")
+        parts = [t]
+        if act.get("role"):
+            parts.append(f'role={act["role"]}')
+        if act.get("name"):
+            parts.append(f'name="{act["name"]}"')
+        if act.get("text"):
+            parts.append(f'text="{act["text"]}"')
+        if act.get("selector"):
+            parts.append(f'selector="{act["selector"]}"')
+        if act.get("url") and t == "goto":
+            parts.append(f'url={act["url"]}')
+        err = str(outcome.get("error", ""))[:80]
+        lines.append(f"- {' '.join(parts)} → {err}")
+    return "\n".join(lines)
+
+
+def _action_signature(action: NavAction) -> tuple:
+    """Key fields that identify what an action targets (for dedup)."""
+    return (action.type, action.role, action.name, action.text, action.selector, action.url)
+
+
+def failed_signatures(history: list[dict[str, Any]]) -> set[tuple]:
+    """Return the set of action signatures that have already failed."""
+    sigs: set[tuple] = set()
+    for h in history:
+        outcome = h.get("outcome") or {}
+        if outcome.get("ok"):
+            continue
+        act = h.get("action") or {}
+        sigs.add((
+            act.get("type"), act.get("role"), act.get("name"),
+            act.get("text"), act.get("selector"), act.get("url"),
+        ))
+    return sigs
+
+
 def next_action_for_shot(
     client: Any,
     model: str,
@@ -82,6 +131,7 @@ def next_action_for_shot(
     step_index: int,
     history: list[dict[str, Any]],
     carry_note: str = "",
+    page_context: str = "",
 ) -> NavAction:
     """
     Vision model chooses ONE next action toward achieving the described screenshot.
@@ -106,16 +156,25 @@ def next_action_for_shot(
         "- Prefer repeat over returning multiple actions.\n"
         "- If modals/tours/cookie banners block UI, close/dismiss them.\n"
         "- Keep actions small and safe.\n"
+        "- NEVER repeat an action that already failed. If click_role/click_text timed out, the element likely doesn't exist with that name — try a different locator, use goto with a direct URL, or try click_text instead of click_role.\n"
     )
+
+    failures = _summarize_failures(history)
+    failure_block = f"\nFAILED ACTIONS (do NOT repeat these):\n{failures}\n" if failures else ""
 
     user_text = (
         f"Step {step_index}\n"
         f"Current URL: {current_url}\n\n"
         f"SHOT GOAL:\n{goal_description}\n\n"
-        f"Carry note (if any): {carry_note}\n\n"
+        f"Carry note (if any): {carry_note}\n"
+        f"{failure_block}\n"
         f"Recent history:\n{json.dumps(history[-10:], indent=2)}"
     )
 
+    log.info("LLM nav request: model=%s step=%d url=%s", model, step_index, current_url)
+    log.debug("LLM prompt:\n%s", user_text)
+
+    t0 = time.monotonic()
     resp = client.responses.create(
         model=model,
         input=[
@@ -129,13 +188,17 @@ def next_action_for_shot(
             },
         ],
     )
+    elapsed = time.monotonic() - t0
 
     raw = (resp.output_text or "").strip()
+    log.info("LLM nav response (%.1fs): %s", elapsed, raw)
+
     action = _parse_action(raw)
 
     # Safety: enforce same-origin for goto
     if action.type == "goto" and action.url:
         if not (is_http_url(action.url) and same_origin(base_url, action.url)):
+            log.warning("Rejected cross-origin goto: %s", action.url)
             return NavAction(type="wait", ms=700, reason="Rejected cross-origin/invalid goto URL; waiting.")
 
     # Clamp repeat
@@ -172,6 +235,9 @@ def pick_crop(
         "- If not presentable, return x=y=w=h=0.\n"
     )
 
+    log.info("LLM crop request: model=%s url=%s (%dx%d)", model, current_url, preview_w, preview_h)
+
+    t0 = time.monotonic()
     resp = client.responses.create(
         model=model,
         input=[
@@ -185,8 +251,11 @@ def pick_crop(
             },
         ],
     )
+    elapsed = time.monotonic() - t0
 
     raw = (resp.output_text or "").strip()
+    log.info("LLM crop response (%.1fs): %s", elapsed, raw)
+
     try:
         obj = json.loads(raw)
         x = int(obj.get("x", 0))
@@ -199,4 +268,5 @@ def pick_crop(
         # We'll clamp later at the caller.
         return Crop(x=x, y=y, w=w, h=h, rationale=rationale)
     except Exception:
+        log.warning("Failed to parse crop response: %s", raw)
         return None
