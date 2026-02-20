@@ -168,6 +168,57 @@ def _pick_carry_note(history: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _get_page_context(page: Page, max_items: int = 80) -> str:
+    """Extract interactive elements from the page accessibility tree."""
+    try:
+        snapshot = page.accessibility.snapshot()
+    except Exception:
+        return ""
+    if not snapshot:
+        return ""
+
+    lines: list[str] = []
+
+    def _walk(node: dict, depth: int = 0) -> None:
+        if len(lines) >= max_items:
+            return
+        role = node.get("role", "")
+        name = node.get("name", "")
+        # Only include interactive/navigable elements
+        if role in ("link", "button", "menuitem", "tab", "checkbox", "radio",
+                     "textbox", "combobox", "searchbox", "option"):
+            prefix = "  " * depth
+            desc = f'{prefix}{role} "{name}"' if name else f"{prefix}{role}"
+            # For links, try to get the URL via the node's value or description
+            if role == "link" and node.get("description"):
+                desc += f' ({node["description"]})'
+            lines.append(desc)
+        for child in node.get("children", []):
+            _walk(child, depth + 1)
+
+    _walk(snapshot)
+
+    # Also grab all <a> hrefs from the page for URL context
+    try:
+        links = page.evaluate("""
+            () => Array.from(document.querySelectorAll('a[href]'))
+                .slice(0, 60)
+                .map(a => ({ text: (a.textContent || '').trim().slice(0, 80), href: a.getAttribute('href') }))
+                .filter(l => l.href && l.href !== '#')
+        """)
+        if links:
+            lines.append("\nLINK HREFS:")
+            for link in links:
+                text = link.get("text", "").replace("\n", " ").strip()
+                href = link.get("href", "")
+                label = f'  "{text}"' if text else "  (no text)"
+                lines.append(f'{label} href={href}')
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
 def _absolutize(base_url: str, maybe_url: str) -> str:
     if maybe_url.startswith("http://") or maybe_url.startswith("https://"):
         return maybe_url
@@ -254,13 +305,15 @@ def run_config(
 
                     log.debug("taking screenshot for LLM")
                     source_png = page.screenshot(full_page=vp.full_page)
-                    preview_png, pw, ph, scale = downscale_png(source_png, max_w=1000)
 
                     if not use_llm:
                         acquired = True
                         break
 
                     from .llm import next_action_for_shot, _action_signature, failed_signatures
+
+                    page_ctx = _get_page_context(page)
+                    log.debug("page_context:\n%s", page_ctx)
 
                     carry_note = _pick_carry_note(shot_history)
                     prev_failed = failed_signatures(shot_history)
@@ -271,10 +324,11 @@ def run_config(
                         base_url=cfg.base_url,
                         current_url=page.url,
                         goal_description=shot.description,
-                        preview_png_bytes=preview_png,
+                        preview_png_bytes=source_png,
                         step_index=step_i,
                         history=shot_history,
                         carry_note=carry_note,
+                        page_context=page_ctx,
                     )
 
                     # Dedup: if the LLM proposed an action identical to one that already failed, re-query once.
@@ -287,10 +341,11 @@ def run_config(
                             base_url=cfg.base_url,
                             current_url=page.url,
                             goal_description=shot.description,
-                            preview_png_bytes=preview_png,
+                            preview_png_bytes=source_png,
                             step_index=step_i,
                             history=shot_history,
                             carry_note="Your previous suggestion was IDENTICAL to an action that already failed. You MUST pick a different approach.",
+                            page_context=page_ctx,
                         )
 
                     log.info("step %d/%d: executing action type=%s reason=%s", step_i, max_steps, action.type, action.reason[:80] if action.reason else "")

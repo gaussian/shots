@@ -157,18 +157,21 @@ def next_action_for_shot(
         "- If modals/tours/cookie banners block UI, close/dismiss them.\n"
         "- Keep actions small and safe.\n"
         "- NEVER repeat an action that already failed. If click_role/click_text timed out, the element likely doesn't exist with that name — try a different locator, use goto with a direct URL, or try click_text instead of click_role.\n"
+        "- Use the PAGE ELEMENTS list to find exact role names, link text, and href URLs. Do NOT guess URLs — use the hrefs shown in the page context.\n"
     )
 
     failures = _summarize_failures(history)
     failure_block = f"\nFAILED ACTIONS (do NOT repeat these):\n{failures}\n" if failures else ""
+    context_block = f"\nPAGE ELEMENTS:\n{page_context}\n" if page_context else ""
 
     user_text = (
         f"Step {step_index}\n"
         f"Current URL: {current_url}\n\n"
         f"SHOT GOAL:\n{goal_description}\n\n"
         f"Carry note (if any): {carry_note}\n"
+        f"{context_block}"
         f"{failure_block}\n"
-        f"Recent history:\n{json.dumps(history[-10:], indent=2)}"
+        f"Recent history:\n{json.dumps(history[-5:], indent=2)}"
     )
 
     log.info("LLM nav request: model=%s step=%d url=%s", model, step_index, current_url)
