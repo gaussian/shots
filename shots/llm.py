@@ -221,19 +221,26 @@ def pick_crop(
     preview_png_bytes: bytes,
     preview_w: int,
     preview_h: int,
+    goal_description: str = "",
 ) -> Crop | None:
     """
     Vision model chooses a crop rectangle on the preview image.
     Returns None if it decides the page is not presentable.
     """
+    goal_hint = f"The screenshot goal is: {goal_description}\n" if goal_description else ""
     system = (
         "You are selecting a marketing screenshot crop.\n"
         "Return ONLY valid JSON with keys: x, y, w, h (integers), rationale (string).\n\n"
         f"The image is {preview_w}x{preview_h} pixels.\n"
+        f"{goal_hint}"
         "Rules:\n"
-        "- Choose a crop that highlights the primary value/UI.\n"
-        "- Avoid modals, cookie banners, toasts, empty whitespace.\n"
-        "- Prefer aspect close to 16:9 or 3:2 when reasonable.\n"
+        "- Choose a crop that highlights the specific UI described in the goal.\n"
+        "- CRITICAL: Do NOT cut off any text or labels. Include ALL content described in the goal.\n"
+        "- Include generous margins — it is FAR better to include a little extra than to cut off any content.\n"
+        "- Make sure field labels on the left side are fully visible (not clipped).\n"
+        "- Make sure all content at the bottom of the target area is included.\n"
+        "- Exclude navigation bars, sidebars, and clearly unrelated UI sections.\n"
+        "- Avoid modals, cookie banners, toasts.\n"
         "- Keep within bounds.\n"
         "- If not presentable, return x=y=w=h=0.\n"
     )

@@ -396,25 +396,45 @@ def run_config(
                     from .llm import pick_crop
 
                     log.info("requesting LLM crop")
-                    preview_png, pw, ph, sc = downscale_png(final_source, max_w=1000)
+                    full_w, full_h = get_png_size(final_source)
+
+                    # Downscale for the crop LLM so coordinates are more accurate
+                    # (vision APIs resize internally; smaller stated dims = better alignment)
+                    preview_bytes, preview_w, preview_h, scale_factor = downscale_png(final_source, max_w=1280)
+                    log.info("crop preview: %dx%d (scale=%.3f from %dx%d)", preview_w, preview_h, scale_factor, full_w, full_h)
+
                     crop = pick_crop(
                         client=client,
                         model=model,
                         base_url=cfg.base_url,
                         current_url=final_url,
-                        preview_png_bytes=preview_png,
-                        preview_w=pw,
-                        preview_h=ph,
+                        preview_png_bytes=preview_bytes,
+                        preview_w=preview_w,
+                        preview_h=preview_h,
+                        goal_description=shot.description,
                     )
                     if crop is not None:
-                        full_w, full_h = get_png_size(final_source)
-                        inv = 1.0 / sc
-                        fx = int(round(crop.x * inv))
-                        fy = int(round(crop.y * inv))
-                        fw = int(round(crop.w * inv))
-                        fh = int(round(crop.h * inv))
-                        fx, fy, fw, fh = clamp_crop(fx, fy, fw, fh, full_w, full_h)
+                        # Scale coordinates back to full resolution
+                        if scale_factor < 1.0:
+                            inv = 1.0 / scale_factor
+                            cx = int(crop.x * inv)
+                            cy = int(crop.y * inv)
+                            cw = int(crop.w * inv)
+                            ch = int(crop.h * inv)
+                        else:
+                            cx, cy, cw, ch = crop.x, crop.y, crop.w, crop.h
+
+                        # Add 8% padding on each side to prevent cutting off content
+                        pad_x = int(cw * 0.08)
+                        pad_y = int(ch * 0.08)
+                        cx = max(0, cx - pad_x)
+                        cy = max(0, cy - pad_y)
+                        cw = cw + 2 * pad_x
+                        ch = ch + 2 * pad_y
+
+                        fx, fy, fw, fh = clamp_crop(cx, cy, cw, ch, full_w, full_h)
                         out_bytes = crop_png(final_source, Crop(fx, fy, fw, fh, crop.rationale))
+                        log.info("cropped to %dx%d at (%d,%d): %s", fw, fh, fx, fy, crop.rationale[:80])
 
                 output_path = out_dir / f"{base_name}.png"
                 output_path.write_bytes(out_bytes)
