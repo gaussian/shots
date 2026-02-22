@@ -238,6 +238,7 @@ def run_config(
     use_llm: bool,
     model: str,
     use_llm_crop: bool,
+    max_crop_retries: int = 2,
     save_source: bool,
     cli_fallback_viewport: Viewport,
 ) -> pathlib.Path:
@@ -383,60 +384,86 @@ def run_config(
                 if not same_origin(cfg.base_url, final_url):
                     raise RuntimeError(f"Final URL moved cross-origin unexpectedly: {final_url}")
 
+                # Per-shot output folder
                 ts = now_ts()
-                base_name = f"{idx:02d}-{safe_filename(shot.id)}-{ts}"
+                folder_name = safe_filename(shot.folder or shot.id)
+                shot_dir = out_dir / folder_name
+                _ensure_dir(shot_dir)
 
                 if save_source:
-                    (out_dir / f"{base_name}-source.png").write_bytes(final_source)
+                    sources_dir = shot_dir / "sources"
+                    _ensure_dir(sources_dir)
+                    (sources_dir / f"{safe_filename(shot.id)}-{ts}-source.png").write_bytes(final_source)
 
                 out_bytes = final_source
 
-                # Optional crop
+                # Optional crop with validation loop
                 if use_llm and use_llm_crop:
-                    from .llm import pick_crop
+                    from .llm import pick_crop, validate_crop
 
                     log.info("requesting LLM crop")
                     full_w, full_h = get_png_size(final_source)
-
-                    # Downscale for the crop LLM so coordinates are more accurate
-                    # (vision APIs resize internally; smaller stated dims = better alignment)
                     preview_bytes, preview_w, preview_h, scale_factor = downscale_png(final_source, max_w=1280)
                     log.info("crop preview: %dx%d (scale=%.3f from %dx%d)", preview_w, preview_h, scale_factor, full_w, full_h)
 
-                    crop = pick_crop(
-                        client=client,
-                        model=model,
-                        base_url=cfg.base_url,
-                        current_url=final_url,
-                        preview_png_bytes=preview_bytes,
-                        preview_w=preview_w,
-                        preview_h=preview_h,
-                        goal_description=shot.description,
-                    )
-                    if crop is not None:
+                    rejection_reason = ""
+                    for crop_attempt in range(1, max_crop_retries + 1):
+                        log.info("crop attempt %d/%d", crop_attempt, max_crop_retries)
+                        crop = pick_crop(
+                            client=client,
+                            model=model,
+                            base_url=cfg.base_url,
+                            current_url=final_url,
+                            preview_png_bytes=preview_bytes,
+                            preview_w=preview_w,
+                            preview_h=preview_h,
+                            goal_description=shot.description,
+                            rejection_reason=rejection_reason,
+                        )
+                        if crop is None:
+                            log.warning("LLM returned no crop, using full image")
+                            break
+
                         # Scale coordinates back to full resolution
                         if scale_factor < 1.0:
                             inv = 1.0 / scale_factor
-                            cx = int(crop.x * inv)
-                            cy = int(crop.y * inv)
-                            cw = int(crop.w * inv)
-                            ch = int(crop.h * inv)
+                            fx, fy, fw, fh = clamp_crop(
+                                int(crop.x * inv), int(crop.y * inv),
+                                int(crop.w * inv), int(crop.h * inv),
+                                full_w, full_h,
+                            )
                         else:
-                            cx, cy, cw, ch = crop.x, crop.y, crop.w, crop.h
+                            fx, fy, fw, fh = clamp_crop(crop.x, crop.y, crop.w, crop.h, full_w, full_h)
 
-                        # Add 8% padding on each side to prevent cutting off content
-                        pad_x = int(cw * 0.08)
-                        pad_y = int(ch * 0.08)
-                        cx = max(0, cx - pad_x)
-                        cy = max(0, cy - pad_y)
-                        cw = cw + 2 * pad_x
-                        ch = ch + 2 * pad_y
-
-                        fx, fy, fw, fh = clamp_crop(cx, cy, cw, ch, full_w, full_h)
                         out_bytes = crop_png(final_source, Crop(fx, fy, fw, fh, crop.rationale))
                         log.info("cropped to %dx%d at (%d,%d): %s", fw, fh, fx, fy, crop.rationale[:80])
 
-                output_path = out_dir / f"{base_name}.png"
+                        # Validate the crop
+                        validation = validate_crop(
+                            client=client,
+                            model=model,
+                            cropped_png_bytes=out_bytes,
+                            goal_description=shot.description,
+                        )
+                        if validation.ok:
+                            log.info("crop validation passed")
+                            break
+                        else:
+                            log.warning("crop validation failed: %s", validation.reason)
+                            rejection_reason = validation.reason
+                            # Reset out_bytes so if we exhaust retries we use last attempt
+                    else:
+                        log.warning("exhausted %d crop retries, using last attempt", max_crop_retries)
+
+                # Write output.png, moving previous to previous/ if it exists
+                output_path = shot_dir / "output.png"
+                if output_path.exists():
+                    prev_dir = shot_dir / "previous"
+                    _ensure_dir(prev_dir)
+                    prev_path = prev_dir / f"{safe_filename(shot.id)}-{ts}.png"
+                    output_path.rename(prev_path)
+                    log.info("moved previous output to %s", prev_path)
+
                 output_path.write_bytes(out_bytes)
 
                 report["shots"].append(

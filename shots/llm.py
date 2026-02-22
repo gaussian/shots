@@ -213,6 +213,12 @@ def next_action_for_shot(
     return action
 
 
+@dataclass
+class CropValidation:
+    ok: bool
+    reason: str = ""
+
+
 def pick_crop(
     client: Any,
     model: str,
@@ -222,12 +228,19 @@ def pick_crop(
     preview_w: int,
     preview_h: int,
     goal_description: str = "",
+    rejection_reason: str = "",
 ) -> Crop | None:
     """
     Vision model chooses a crop rectangle on the preview image.
     Returns None if it decides the page is not presentable.
     """
     goal_hint = f"The screenshot goal is: {goal_description}\n" if goal_description else ""
+    rejection_block = ""
+    if rejection_reason:
+        rejection_block = (
+            f"\nPREVIOUS CROP WAS REJECTED: {rejection_reason}\n"
+            "Choose a LARGER area that includes the missing content.\n"
+        )
     system = (
         "You are selecting a marketing screenshot crop.\n"
         "Return ONLY valid JSON with keys: x, y, w, h (integers), rationale (string).\n\n"
@@ -245,7 +258,10 @@ def pick_crop(
         "- If not presentable, return x=y=w=h=0.\n"
     )
 
-    log.info("LLM crop request: model=%s url=%s (%dx%d)", model, current_url, preview_w, preview_h)
+    user_text = f"base_url={base_url}\ncurrent_url={current_url}{rejection_block}"
+
+    log.info("LLM crop request: model=%s url=%s (%dx%d)%s", model, current_url, preview_w, preview_h,
+             " (retry)" if rejection_reason else "")
 
     t0 = time.monotonic()
     resp = client.responses.create(
@@ -255,7 +271,7 @@ def pick_crop(
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": f"base_url={base_url}\ncurrent_url={current_url}"},
+                    {"type": "input_text", "text": user_text},
                     {"type": "input_image", "image_url": f"data:image/png;base64,{b64_png(preview_png_bytes)}"},
                 ],
             },
@@ -275,8 +291,61 @@ def pick_crop(
         rationale = str(obj.get("rationale", ""))[:400]
         if x == 0 and y == 0 and w == 0 and h == 0:
             return None
-        # We'll clamp later at the caller.
         return Crop(x=x, y=y, w=w, h=h, rationale=rationale)
     except Exception:
         log.warning("Failed to parse crop response: %s", raw)
         return None
+
+
+def validate_crop(
+    client: Any,
+    model: str,
+    cropped_png_bytes: bytes,
+    goal_description: str,
+) -> CropValidation:
+    """
+    Ask the LLM whether the cropped image fully satisfies the goal.
+    """
+    system = (
+        "You are reviewing a cropped screenshot for a marketing image.\n"
+        "Return ONLY valid JSON with keys: ok (boolean), reason (string).\n\n"
+        "Check whether the cropped image contains all the VISUAL CONTENT described in the goal.\n"
+        "Focus ONLY on whether the described UI elements, fields, and data are visible and not clipped.\n"
+        "IGNORE navigation instructions in the goal (URLs, click instructions, scroll instructions) — "
+        "those are for the browser operator, not for the screenshot content.\n"
+        "Set ok=true if all described visual content is visible and not clipped.\n"
+        "Set ok=false ONLY if actual UI content (fields, labels, data) is missing or cut off.\n"
+        "When ok=false, explain specifically what visual content is missing or clipped.\n"
+    )
+
+    user_text = f"GOAL:\n{goal_description}"
+
+    log.info("LLM crop validation request")
+
+    t0 = time.monotonic()
+    resp = client.responses.create(
+        model=model,
+        input=[
+            {"role": "system", "content": [{"type": "input_text", "text": system}]},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": user_text},
+                    {"type": "input_image", "image_url": f"data:image/png;base64,{b64_png(cropped_png_bytes)}"},
+                ],
+            },
+        ],
+    )
+    elapsed = time.monotonic() - t0
+
+    raw = (resp.output_text or "").strip()
+    log.info("LLM crop validation response (%.1fs): %s", elapsed, raw)
+
+    try:
+        obj = json.loads(raw)
+        ok = bool(obj.get("ok", False))
+        reason = str(obj.get("reason", ""))[:400]
+        return CropValidation(ok=ok, reason=reason)
+    except Exception:
+        log.warning("Failed to parse crop validation response: %s", raw)
+        return CropValidation(ok=True, reason="")

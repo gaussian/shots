@@ -19,6 +19,7 @@ class ShotSpec:
     viewport_preset: str | None = None
     viewport: dict[str, int] | None = None  # width/height/scale
     full_page: bool | None = None
+    folder: str | None = None  # override subfolder name (defaults to id)
 
 
 @dataclass
@@ -27,6 +28,7 @@ class RunConfig:
     start: str
     defaults: dict[str, Any]
     shots: list[ShotSpec]
+    out_dir: str = "shots_out"
 
 
 def _require_str(obj: dict[str, Any], key: str) -> str:
@@ -51,6 +53,7 @@ def load_config(path: str) -> RunConfig:
 
     base_url = _require_str(data, "base_url").rstrip("/")
     start = str(data.get("start", "/")).strip() or "/"
+    out_dir = str(data.get("out_dir", "shots_out")).strip() or "shots_out"
     defaults = data.get("defaults", {}) or {}
     if not isinstance(defaults, dict):
         raise ValueError("defaults must be an object.")
@@ -78,7 +81,8 @@ def load_config(path: str) -> RunConfig:
                 viewport_preset=str(s["viewport_preset"]).strip() if s.get("viewport_preset") else None,
                 viewport={k: int(v) for k, v in viewport.items()} if viewport else None,
                 full_page=bool(s["full_page"]) if "full_page" in s else None,
+                folder=str(s["folder"]).strip() if s.get("folder") else None,
             )
         )
 
-    return RunConfig(base_url=base_url, start=start, defaults=defaults, shots=shots)
+    return RunConfig(base_url=base_url, start=start, defaults=defaults, shots=shots, out_dir=out_dir)
