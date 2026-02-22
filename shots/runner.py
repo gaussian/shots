@@ -9,8 +9,9 @@ from urllib.parse import urljoin
 
 from playwright.sync_api import Page, sync_playwright
 
-from .config import RunConfig, ShotSpec
-from .image_ops import Crop, clamp_crop, crop_png, downscale_png, get_png_size
+from .config import RunConfig, ShotGroup, ShotSpec
+from .image_ops import Crop, add_label_banner, clamp_crop, crop_png, downscale_png, get_png_size, pngs_to_pdf
+from .labels import desensitize_url, render_label
 from .stability import wait_until_stable
 from .utils import StepOutcome, normalize_url, now_ts, safe_filename, same_origin
 from .viewport import Viewport, viewport_from_preset, viewport_from_values
@@ -253,7 +254,9 @@ def run_config(
     if not state_path.exists():
         raise RuntimeError(f"Missing {state_path}. Run: shots login --base-url {cfg.base_url} --out-dir {out_dir}")
 
-    log.info("run_config: base_url=%s shots=%d use_llm=%s model=%s timeout=%dms action_timeout=%dms", cfg.base_url, len(cfg.shots), use_llm, model, timeout_ms, action_timeout_ms)
+    total_shots = sum(len(g.shots) for g in cfg.groups)
+    log.info("run_config: base_url=%s groups=%d shots=%d use_llm=%s model=%s timeout=%dms action_timeout=%dms",
+             cfg.base_url, len(cfg.groups), total_shots, use_llm, model, timeout_ms, action_timeout_ms)
 
     client = None
     if use_llm:
@@ -262,80 +265,75 @@ def run_config(
         client = make_openai_client()
         log.info("OpenAI client created")
 
-    report: dict[str, Any] = {"base_url": cfg.base_url, "shots": [], "config": None}
+    report: dict[str, Any] = {"base_url": cfg.base_url, "groups": [], "config": None}
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=not headed)
+        shot_counter = 0
 
-        for idx, shot in enumerate(cfg.shots, start=1):
-            log.info("--- shot %d/%d: %s ---", idx, len(cfg.shots), shot.id)
-            vp = _resolve_viewport_for_shot(cfg.defaults, shot, cli_fallback_viewport)
+        for group in cfg.groups:
+            log.info("=== group: %s (output=%s, %d shots) ===", group.id, group.output, len(group.shots))
+            group_dir = out_dir / safe_filename(group.folder or group.id)
+            _ensure_dir(group_dir)
 
-            # New context per shot so scale can vary.
-            context = browser.new_context(
-                storage_state=str(state_path),
-                viewport={"width": vp.width, "height": vp.height},
-                device_scale_factor=vp.scale,
-            )
-            page = context.new_page()
+            group_pngs: list[bytes] = []
+            group_report: dict[str, Any] = {
+                "id": group.id,
+                "output": group.output,
+                "shots": [],
+            }
+            group_ok = True
 
-            shot_history: list[dict[str, Any]] = []
-            final_url = ""
-            output_path: pathlib.Path | None = None
+            for shot in group.shots:
+                shot_counter += 1
+                log.info("--- shot %d/%d: %s ---", shot_counter, total_shots, shot.id)
+                vp = _resolve_viewport_for_shot(cfg.defaults, shot, cli_fallback_viewport)
 
-            try:
-                # Choose initial URL: shot.url else config.start
-                start = shot.url or cfg.start
-                start_url = _absolutize(cfg.base_url, start)
-                start_url = normalize_url(start_url)
+                context = browser.new_context(
+                    storage_state=str(state_path),
+                    viewport={"width": vp.width, "height": vp.height},
+                    device_scale_factor=vp.scale,
+                )
+                page = context.new_page()
 
-                log.info("goto %s", start_url)
-                page.goto(start_url, wait_until="domcontentloaded", timeout=timeout_ms)
-                log.info("initial page loaded, waiting for stability")
-                wait_until_stable(page, timeout_ms=timeout_ms)
+                shot_history: list[dict[str, Any]] = []
+                final_url = ""
 
-                max_steps = int(cfg.defaults.get("max_nav_steps", 12))
+                try:
+                    start = shot.url or cfg.start
+                    start_url = _absolutize(cfg.base_url, start)
+                    start_url = normalize_url(start_url)
 
-                if not use_llm and not shot.url:
-                    raise RuntimeError("Shot has no url and --use-llm is false; cannot acquire from description.")
-
-                acquired = False
-                for step_i in range(1, max_steps + 1):
-                    log.info("step %d/%d: waiting for stability", step_i, max_steps)
+                    log.info("goto %s", start_url)
+                    page.goto(start_url, wait_until="domcontentloaded", timeout=timeout_ms)
+                    log.info("initial page loaded, waiting for stability")
                     wait_until_stable(page, timeout_ms=timeout_ms)
 
-                    log.debug("taking screenshot for LLM")
-                    source_png = page.screenshot(full_page=vp.full_page)
+                    max_steps = int(cfg.defaults.get("max_nav_steps", 12))
 
-                    if not use_llm:
-                        acquired = True
-                        break
+                    if not use_llm and not shot.url:
+                        raise RuntimeError("Shot has no url and --use-llm is false; cannot acquire from description.")
 
-                    from .llm import next_action_for_shot, _action_signature, failed_signatures
+                    acquired = False
+                    for step_i in range(1, max_steps + 1):
+                        log.info("step %d/%d: waiting for stability", step_i, max_steps)
+                        wait_until_stable(page, timeout_ms=timeout_ms)
 
-                    page_ctx = _get_page_context(page)
-                    log.debug("page_context:\n%s", page_ctx)
+                        log.debug("taking screenshot for LLM")
+                        source_png = page.screenshot(full_page=vp.full_page)
 
-                    carry_note = _pick_carry_note(shot_history)
-                    prev_failed = failed_signatures(shot_history)
-                    log.info("step %d/%d: calling LLM", step_i, max_steps)
-                    action = next_action_for_shot(
-                        client=client,
-                        model=model,
-                        base_url=cfg.base_url,
-                        current_url=page.url,
-                        goal_description=shot.description,
-                        preview_png_bytes=source_png,
-                        step_index=step_i,
-                        history=shot_history,
-                        carry_note=carry_note,
-                        page_context=page_ctx,
-                    )
+                        if not use_llm:
+                            acquired = True
+                            break
 
-                    # Dedup: if the LLM proposed an action identical to one that already failed, re-query once.
-                    sig = _action_signature(action)
-                    if sig in prev_failed and action.type not in ("done", "fail", "wait", "scroll"):
-                        log.warning("step %d/%d: LLM repeated a failed action (%s), re-querying", step_i, max_steps, action.type)
+                        from .llm import next_action_for_shot, _action_signature, failed_signatures
+
+                        page_ctx = _get_page_context(page)
+                        log.debug("page_context:\n%s", page_ctx)
+
+                        carry_note = _pick_carry_note(shot_history)
+                        prev_failed = failed_signatures(shot_history)
+                        log.info("step %d/%d: calling LLM", step_i, max_steps)
                         action = next_action_for_shot(
                             client=client,
                             model=model,
@@ -345,153 +343,185 @@ def run_config(
                             preview_png_bytes=source_png,
                             step_index=step_i,
                             history=shot_history,
-                            carry_note="Your previous suggestion was IDENTICAL to an action that already failed. You MUST pick a different approach.",
+                            carry_note=carry_note,
                             page_context=page_ctx,
                         )
 
-                    log.info("step %d/%d: executing action type=%s reason=%s", step_i, max_steps, action.type, action.reason[:80] if action.reason else "")
-                    url_before = page.url
-                    outcome = _execute_action(page, action, timeout_ms=action_timeout_ms, nav_timeout_ms=timeout_ms)
-                    log.info("step %d/%d: action result ok=%s error=%s", step_i, max_steps, outcome.ok, outcome.error or "")
-                    wait_until_stable(page, timeout_ms=timeout_ms)
+                        sig = _action_signature(action)
+                        if sig in prev_failed and action.type not in ("done", "fail", "wait", "scroll"):
+                            log.warning("step %d/%d: LLM repeated a failed action (%s), re-querying", step_i, max_steps, action.type)
+                            action = next_action_for_shot(
+                                client=client,
+                                model=model,
+                                base_url=cfg.base_url,
+                                current_url=page.url,
+                                goal_description=shot.description,
+                                preview_png_bytes=source_png,
+                                step_index=step_i,
+                                history=shot_history,
+                                carry_note="Your previous suggestion was IDENTICAL to an action that already failed. You MUST pick a different approach.",
+                                page_context=page_ctx,
+                            )
 
-                    shot_history.append(
+                        log.info("step %d/%d: executing action type=%s reason=%s", step_i, max_steps, action.type, action.reason[:80] if action.reason else "")
+                        url_before = page.url
+                        outcome = _execute_action(page, action, timeout_ms=action_timeout_ms, nav_timeout_ms=timeout_ms)
+                        log.info("step %d/%d: action result ok=%s error=%s", step_i, max_steps, outcome.ok, outcome.error or "")
+                        wait_until_stable(page, timeout_ms=timeout_ms)
+
+                        shot_history.append(
+                            {
+                                "step": step_i,
+                                "url_before": url_before,
+                                "url_after": page.url,
+                                "action": action.__dict__,
+                                "outcome": {"ok": outcome.ok, "error": outcome.error, "extra": outcome.extra},
+                            }
+                        )
+
+                        if action.type == "done":
+                            acquired = True
+                            log.info("LLM says done")
+                            break
+                        if action.type == "fail":
+                            raise RuntimeError(f"LLM failed: {action.reason}")
+
+                    if not acquired:
+                        raise RuntimeError(f"Failed to acquire shot within {max_steps} steps.")
+
+                    # Final capture
+                    log.info("final capture")
+                    wait_until_stable(page, timeout_ms=timeout_ms)
+                    final_source = page.screenshot(full_page=vp.full_page)
+                    final_url = page.url
+
+                    if not same_origin(cfg.base_url, final_url):
+                        raise RuntimeError(f"Final URL moved cross-origin unexpectedly: {final_url}")
+
+                    ts = now_ts()
+
+                    if save_source:
+                        sources_dir = group_dir / "sources"
+                        _ensure_dir(sources_dir)
+                        (sources_dir / f"{safe_filename(shot.id)}-{ts}-source.png").write_bytes(final_source)
+
+                    out_bytes = final_source
+
+                    # Optional crop with validation loop
+                    if use_llm and use_llm_crop:
+                        from .llm import pick_crop, validate_crop
+
+                        log.info("requesting LLM crop")
+                        full_w, full_h = get_png_size(final_source)
+                        preview_bytes, preview_w, preview_h, scale_factor = downscale_png(final_source, max_w=1280)
+                        log.info("crop preview: %dx%d (scale=%.3f from %dx%d)", preview_w, preview_h, scale_factor, full_w, full_h)
+
+                        rejection_reason = ""
+                        for crop_attempt in range(1, max_crop_retries + 1):
+                            log.info("crop attempt %d/%d", crop_attempt, max_crop_retries)
+                            crop = pick_crop(
+                                client=client,
+                                model=model,
+                                base_url=cfg.base_url,
+                                current_url=final_url,
+                                preview_png_bytes=preview_bytes,
+                                preview_w=preview_w,
+                                preview_h=preview_h,
+                                goal_description=shot.description,
+                                rejection_reason=rejection_reason,
+                            )
+                            if crop is None:
+                                log.warning("LLM returned no crop, using full image")
+                                break
+
+                            if scale_factor < 1.0:
+                                inv = 1.0 / scale_factor
+                                fx, fy, fw, fh = clamp_crop(
+                                    int(crop.x * inv), int(crop.y * inv),
+                                    int(crop.w * inv), int(crop.h * inv),
+                                    full_w, full_h,
+                                )
+                            else:
+                                fx, fy, fw, fh = clamp_crop(crop.x, crop.y, crop.w, crop.h, full_w, full_h)
+
+                            out_bytes = crop_png(final_source, Crop(fx, fy, fw, fh, crop.rationale))
+                            log.info("cropped to %dx%d at (%d,%d): %s", fw, fh, fx, fy, crop.rationale[:80])
+
+                            validation = validate_crop(
+                                client=client,
+                                model=model,
+                                cropped_png_bytes=out_bytes,
+                                goal_description=shot.description,
+                            )
+                            if validation.ok:
+                                log.info("crop validation passed")
+                                break
+                            else:
+                                log.warning("crop validation failed: %s", validation.reason)
+                                rejection_reason = validation.reason
+                        else:
+                            log.warning("exhausted %d crop retries, using last attempt", max_crop_retries)
+
+                    # Apply label if configured
+                    label_template = shot.label or group.label
+                    if label_template:
+                        label_text = render_label(label_template, {
+                            "url": desensitize_url(final_url, cfg.base_url),
+                            "id": shot.id,
+                            "title": shot.description.strip()[:80],
+                        })
+                        out_bytes = add_label_banner(out_bytes, label_text)
+                        log.info("added label: %s", label_text)
+
+                    # Save individual shot PNG
+                    shot_png_path = group_dir / f"{safe_filename(shot.id)}.png"
+                    shot_png_path.write_bytes(out_bytes)
+                    group_pngs.append(out_bytes)
+
+                    group_report["shots"].append(
                         {
-                            "step": step_i,
-                            "url_before": url_before,
-                            "url_after": page.url,
-                            "action": action.__dict__,
-                            "outcome": {"ok": outcome.ok, "error": outcome.error, "extra": outcome.extra},
+                            "id": shot.id,
+                            "status": "ok",
+                            "output": str(shot_png_path),
+                            "final_url": final_url,
+                            "viewport": {"width": vp.width, "height": vp.height, "scale": vp.scale, "full_page": vp.full_page},
+                            "history_tail": shot_history[-25:],
                         }
                     )
 
-                    if action.type == "done":
-                        acquired = True
-                        log.info("LLM says done")
-                        break
-                    if action.type == "fail":
-                        raise RuntimeError(f"LLM failed: {action.reason}")
+                    log.info("[OK] %s -> %s", shot.id, shot_png_path)
+                    print(f"[OK] {shot.id} -> {shot_png_path}")
 
-                if not acquired:
-                    raise RuntimeError(f"Failed to acquire shot within {max_steps} steps.")
+                except Exception as e:
+                    log.error("[ERROR] %s: %s", shot.id, e)
+                    group_report["shots"].append({"id": shot.id, "status": "error", "error": str(e), "final_url": final_url, "history_tail": shot_history[-25:]})
+                    print(f"[ERROR] {shot.id}: {e}")
+                    group_ok = False
 
-                # Final capture (stable)
-                log.info("final capture")
-                wait_until_stable(page, timeout_ms=timeout_ms)
-                final_source = page.screenshot(full_page=vp.full_page)
-                final_url = page.url
+                finally:
+                    context.close()
 
-                if not same_origin(cfg.base_url, final_url):
-                    raise RuntimeError(f"Final URL moved cross-origin unexpectedly: {final_url}")
+            # Group output assembly
+            if group_ok and group_pngs:
+                if group.output == "pdf":
+                    pdf_path = group_dir / "output.pdf"
+                    pdf_bytes = pngs_to_pdf(group_pngs)
+                    pdf_path.write_bytes(pdf_bytes)
+                    group_report["output_file"] = str(pdf_path)
+                    log.info("[OK] group %s -> %s (%d pages)", group.id, pdf_path, len(group_pngs))
+                    print(f"[OK] group {group.id} -> {pdf_path} ({len(group_pngs)} pages)")
+                else:
+                    # png mode — single shot, symlink or copy as output.png
+                    output_path = group_dir / "output.png"
+                    if output_path.exists():
+                        prev_dir = group_dir / "previous"
+                        _ensure_dir(prev_dir)
+                        prev_path = prev_dir / f"{safe_filename(group.id)}-{now_ts()}.png"
+                        output_path.rename(prev_path)
+                    output_path.write_bytes(group_pngs[0])
+                    group_report["output_file"] = str(output_path)
 
-                # Per-shot output folder
-                ts = now_ts()
-                folder_name = safe_filename(shot.folder or shot.id)
-                shot_dir = out_dir / folder_name
-                _ensure_dir(shot_dir)
-
-                if save_source:
-                    sources_dir = shot_dir / "sources"
-                    _ensure_dir(sources_dir)
-                    (sources_dir / f"{safe_filename(shot.id)}-{ts}-source.png").write_bytes(final_source)
-
-                out_bytes = final_source
-
-                # Optional crop with validation loop
-                if use_llm and use_llm_crop:
-                    from .llm import pick_crop, validate_crop
-
-                    log.info("requesting LLM crop")
-                    full_w, full_h = get_png_size(final_source)
-                    preview_bytes, preview_w, preview_h, scale_factor = downscale_png(final_source, max_w=1280)
-                    log.info("crop preview: %dx%d (scale=%.3f from %dx%d)", preview_w, preview_h, scale_factor, full_w, full_h)
-
-                    rejection_reason = ""
-                    for crop_attempt in range(1, max_crop_retries + 1):
-                        log.info("crop attempt %d/%d", crop_attempt, max_crop_retries)
-                        crop = pick_crop(
-                            client=client,
-                            model=model,
-                            base_url=cfg.base_url,
-                            current_url=final_url,
-                            preview_png_bytes=preview_bytes,
-                            preview_w=preview_w,
-                            preview_h=preview_h,
-                            goal_description=shot.description,
-                            rejection_reason=rejection_reason,
-                        )
-                        if crop is None:
-                            log.warning("LLM returned no crop, using full image")
-                            break
-
-                        # Scale coordinates back to full resolution
-                        if scale_factor < 1.0:
-                            inv = 1.0 / scale_factor
-                            fx, fy, fw, fh = clamp_crop(
-                                int(crop.x * inv), int(crop.y * inv),
-                                int(crop.w * inv), int(crop.h * inv),
-                                full_w, full_h,
-                            )
-                        else:
-                            fx, fy, fw, fh = clamp_crop(crop.x, crop.y, crop.w, crop.h, full_w, full_h)
-
-                        out_bytes = crop_png(final_source, Crop(fx, fy, fw, fh, crop.rationale))
-                        log.info("cropped to %dx%d at (%d,%d): %s", fw, fh, fx, fy, crop.rationale[:80])
-
-                        # Validate the crop
-                        validation = validate_crop(
-                            client=client,
-                            model=model,
-                            cropped_png_bytes=out_bytes,
-                            goal_description=shot.description,
-                        )
-                        if validation.ok:
-                            log.info("crop validation passed")
-                            break
-                        else:
-                            log.warning("crop validation failed: %s", validation.reason)
-                            rejection_reason = validation.reason
-                            # Reset out_bytes so if we exhaust retries we use last attempt
-                    else:
-                        log.warning("exhausted %d crop retries, using last attempt", max_crop_retries)
-
-                # Write output.png, moving previous to previous/ if it exists
-                output_path = shot_dir / "output.png"
-                if output_path.exists():
-                    prev_dir = shot_dir / "previous"
-                    _ensure_dir(prev_dir)
-                    prev_path = prev_dir / f"{safe_filename(shot.id)}-{ts}.png"
-                    output_path.rename(prev_path)
-                    log.info("moved previous output to %s", prev_path)
-
-                output_path.write_bytes(out_bytes)
-
-                report["shots"].append(
-                    {
-                        "id": shot.id,
-                        "status": "ok",
-                        "output": str(output_path),
-                        "final_url": final_url,
-                        "viewport": {
-                            "width": vp.width,
-                            "height": vp.height,
-                            "scale": vp.scale,
-                            "full_page": vp.full_page,
-                        },
-                        "history_tail": shot_history[-25:],
-                    }
-                )
-
-                log.info("[OK] %s -> %s", shot.id, output_path)
-                print(f"[OK] {shot.id} -> {output_path}")
-
-            except Exception as e:
-                log.error("[ERROR] %s: %s", shot.id, e)
-                report["shots"].append({"id": shot.id, "status": "error", "error": str(e), "final_url": final_url, "history_tail": shot_history[-25:]})
-                print(f"[ERROR] {shot.id}: {e}")
-
-            finally:
-                context.close()
+            report["groups"].append(group_report)
 
         browser.close()
 
