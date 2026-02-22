@@ -65,7 +65,7 @@ def _parse_shot(s: dict[str, Any], ctx: str) -> ShotSpec:
         viewport_preset=str(s["viewport_preset"]).strip() if s.get("viewport_preset") else None,
         viewport={k: int(v) for k, v in viewport.items()} if viewport else None,
         full_page=bool(s["full_page"]) if "full_page" in s else None,
-        label=str(s["label"]).strip() if s.get("label") else None,
+        label=str(s["label"]).strip().replace("\\n", "\n") if s.get("label") else None,
     )
 
 
@@ -129,7 +129,7 @@ def load_config(path: str) -> RunConfig:
                 id=gid,
                 shots=shots,
                 output=output,
-                label=str(g["label"]).strip() if g.get("label") else None,
+                label=str(g["label"]).strip().replace("\\n", "\n") if g.get("label") else None,
                 label_date=bool(g.get("label_date", False)),
                 folder=str(g["folder"]).strip() if g.get("folder") else None,
             ))
