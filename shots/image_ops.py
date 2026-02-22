@@ -86,26 +86,40 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def add_label_banner(png_bytes: bytes, label_text: str, font_size: int = 32) -> bytes:
     """
-    Add a white banner with black text below the image. Additive — does not
-    crop into the screenshot, just extends the canvas downward.
+    Add a white banner with black text below the image, separated by a black
+    line. Additive — does not crop into the screenshot, just extends the canvas
+    downward. Supports multiline text (e.g. label + date on separate lines).
     """
     im = Image.open(BytesIO(png_bytes)).convert("RGBA")
     w, h = im.size
 
     font = _get_font(font_size)
-    padding = font_size // 2
-    banner_h = font_size + 2 * padding
+    line_thickness = 2
+    padding = font_size  # gap above and below text block
+    line_spacing = font_size // 2  # extra gap between lines
 
-    # New canvas: original + banner
+    # Measure multiline text height
+    tmp_draw = ImageDraw.Draw(im)
+    text_bbox = tmp_draw.multiline_textbbox((0, 0), label_text, font=font, spacing=line_spacing)
+    text_block_h = text_bbox[3] - text_bbox[1]
+
+    banner_h = line_thickness + 2 * padding + text_block_h
+
+    # New canvas: original + separator + banner
     out = Image.new("RGBA", (w, h + banner_h), (255, 255, 255, 255))
     out.paste(im, (0, 0))
 
     draw = ImageDraw.Draw(out)
-    bbox = draw.textbbox((0, 0), label_text, font=font)
-    text_w = bbox[2] - bbox[0]
+
+    # Black separator line
+    draw.rectangle([(0, h), (w, h + line_thickness)], fill=(0, 0, 0, 255))
+
+    # Centered multiline text
+    text_bbox = draw.multiline_textbbox((0, 0), label_text, font=font, spacing=line_spacing)
+    text_w = text_bbox[2] - text_bbox[0]
     text_x = (w - text_w) // 2
-    text_y = h + padding
-    draw.text((text_x, text_y), label_text, fill=(0, 0, 0, 255), font=font)
+    text_y = h + line_thickness + padding
+    draw.multiline_text((text_x, text_y), label_text, fill=(0, 0, 0, 255), font=font, align="center", spacing=line_spacing)
 
     buf = BytesIO()
     out.save(buf, format="PNG")

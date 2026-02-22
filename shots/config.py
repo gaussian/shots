@@ -28,6 +28,7 @@ class ShotGroup:
     shots: list[ShotSpec]
     output: str = "png"  # "png" or "pdf"
     label: str | None = None  # template string applied to all shots
+    label_date: bool = False  # add date/time line below the label
     folder: str | None = None  # override subfolder name (defaults to id)
 
 
@@ -129,6 +130,7 @@ def load_config(path: str) -> RunConfig:
                 shots=shots,
                 output=output,
                 label=str(g["label"]).strip() if g.get("label") else None,
+                label_date=bool(g.get("label_date", False)),
                 folder=str(g["folder"]).strip() if g.get("folder") else None,
             ))
 

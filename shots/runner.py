@@ -470,8 +470,11 @@ def run_config(
                             "id": shot.id,
                             "title": shot.description.strip()[:80],
                         })
+                        if group.label_date:
+                            from datetime import datetime, timezone
+                            label_text += "\n" + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                         out_bytes = add_label_banner(out_bytes, label_text)
-                        log.info("added label: %s", label_text)
+                        log.info("added label: %s", label_text.replace("\n", " | "))
 
                     # Save individual shot PNG
                     shot_png_path = group_dir / f"{safe_filename(shot.id)}.png"
