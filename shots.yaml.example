@@ -12,8 +12,8 @@ shots:
     description: >
       Capture the main dashboard with KPI cards and a chart visible.
       Close any modal, cookie banner, or tour overlay. If needed, use the left nav to reach Dashboard.
-  - id: wizard-step-4
+
+  - id: integrations
     description: >
-      Open the onboarding wizard and click the red button 3 times to reach step 4 summary,
-      then stop when the summary screen is visible and presentable.
+      Show Settings -> Integrations page listing available integrations.
     viewport_preset: laptop

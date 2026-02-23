@@ -10,13 +10,15 @@ from .viewport import VIEWPORT_PRESETS, viewport_from_values
 
 
 def _add_common_run_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--out-dir", default="shots_out")
+    p.add_argument("--out-dir", default=None, help="Output directory (overrides config out_dir, default: shots_out).")
     p.add_argument("--headed", action="store_true", help="Show the browser (debug).")
-    p.add_argument("--timeout-ms", type=int, default=45_000)
+    p.add_argument("--timeout-ms", type=int, default=10_000, help="Page-load/navigation timeout.")
+    p.add_argument("--action-timeout-ms", type=int, default=5_000, help="Timeout for clicks/typing (fail fast).")
 
     p.add_argument("--use-llm", action="store_true", help="Enable LLM multi-step navigation to acquire each shot.")
-    p.add_argument("--model", default="gpt-4.1")
+    p.add_argument("--model", default="gpt-5.2")
     p.add_argument("--use-llm-crop", action="store_true", help="Use LLM to choose a crop box.")
+    p.add_argument("--max-crop-retries", type=int, default=2, help="Max crop validation retries (default: 2).")
     p.add_argument("--save-source", action="store_true", help="Save uncropped source images too.")
 
 
@@ -77,7 +79,9 @@ def cmd_login(args) -> None:
 
 def cmd_run_config(args) -> None:
     cfg = load_config(args.config)
-    out_dir = pathlib.Path(args.out_dir).resolve()
+    # CLI --out-dir overrides config out_dir
+    out_dir_str = args.out_dir if args.out_dir is not None else cfg.out_dir
+    out_dir = pathlib.Path(out_dir_str).resolve()
 
     w, h, scale, full_page = _resolve_cli_viewport(args)
     fallback = viewport_from_values(w, h, scale, full_page=full_page)
@@ -86,10 +90,12 @@ def cmd_run_config(args) -> None:
         cfg=cfg,
         out_dir=out_dir,
         timeout_ms=args.timeout_ms,
+        action_timeout_ms=args.action_timeout_ms,
         headed=args.headed,
         use_llm=args.use_llm,
         model=args.model,
         use_llm_crop=args.use_llm_crop,
+        max_crop_retries=args.max_crop_retries,
         save_source=args.save_source,
         cli_fallback_viewport=fallback,
     )

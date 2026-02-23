@@ -4,7 +4,7 @@ import base64
 from dataclasses import dataclass
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 
 def b64_png(png_bytes: bytes) -> str:
@@ -64,3 +64,81 @@ def crop_png(png_bytes: bytes, crop: Crop) -> bytes:
 def get_png_size(png_bytes: bytes) -> tuple[int, int]:
     im = Image.open(BytesIO(png_bytes))
     return im.size
+
+
+def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Try common system sans-serif fonts, fall back to Pillow default."""
+    candidates = [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSText.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "arial.ttf",
+        "DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default(size=size)
+
+
+def add_label_banner(png_bytes: bytes, label_text: str, font_size: int = 32) -> bytes:
+    """
+    Add a white banner with black text below the image, separated by a black
+    line. Additive — does not crop into the screenshot, just extends the canvas
+    downward. Supports multiline text (e.g. label + date on separate lines).
+    """
+    im = Image.open(BytesIO(png_bytes)).convert("RGBA")
+    w, h = im.size
+
+    font = _get_font(font_size)
+    line_thickness = 2
+    padding = font_size  # gap above and below text block
+    line_spacing = font_size // 2  # extra gap between lines
+
+    # Measure multiline text height
+    tmp_draw = ImageDraw.Draw(im)
+    text_bbox = tmp_draw.multiline_textbbox((0, 0), label_text, font=font, spacing=line_spacing)
+    text_block_h = text_bbox[3] - text_bbox[1]
+
+    banner_h = line_thickness + 2 * padding + text_block_h
+
+    # New canvas: original + separator + banner
+    out = Image.new("RGBA", (w, h + banner_h), (255, 255, 255, 255))
+    out.paste(im, (0, 0))
+
+    draw = ImageDraw.Draw(out)
+
+    # Black separator line
+    draw.rectangle([(0, h), (w, h + line_thickness)], fill=(0, 0, 0, 255))
+
+    # Centered multiline text
+    text_bbox = draw.multiline_textbbox((0, 0), label_text, font=font, spacing=line_spacing)
+    text_w = text_bbox[2] - text_bbox[0]
+    text_x = (w - text_w) // 2
+    text_y = h + line_thickness + padding
+    draw.multiline_text((text_x, text_y), label_text, fill=(0, 0, 0, 255), font=font, align="center", spacing=line_spacing)
+
+    buf = BytesIO()
+    out.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def pngs_to_pdf(png_bytes_list: list[bytes]) -> bytes:
+    """
+    Combine multiple PNG images into a single PDF (one image per page).
+    Uses Pillow's built-in PDF support — no extra dependencies.
+    """
+    images: list[Image.Image] = []
+    for png_bytes in png_bytes_list:
+        im = Image.open(BytesIO(png_bytes)).convert("RGB")
+        images.append(im)
+
+    buf = BytesIO()
+    if len(images) == 1:
+        images[0].save(buf, format="PDF")
+    else:
+        images[0].save(buf, format="PDF", save_all=True, append_images=images[1:])
+    return buf.getvalue()
