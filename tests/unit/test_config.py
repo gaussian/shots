@@ -189,6 +189,7 @@ class TestShotSpec:
         assert shot.viewport_preset is None
         assert shot.viewport is None
         assert shot.full_page is None
+        assert shot.overwrite is None
 
     def test_shot_spec_with_all_fields(self):
         shot = ShotSpec(
@@ -248,3 +249,35 @@ class TestLoadConfigDefaults:
         path.write_text(json.dumps(config))
         cfg = load_config(str(path))
         assert cfg.base_url == "https://example.com"
+
+
+class TestShotSpecOverwrite:
+    def test_overwrite_true_parsed(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "shots": [{"id": "test", "description": "test", "overwrite": True}],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[0].overwrite is True
+
+    def test_overwrite_false_parsed(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "shots": [{"id": "test", "description": "test", "overwrite": False}],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[0].overwrite is False
+
+    def test_overwrite_absent_defaults_to_none(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "shots": [{"id": "test", "description": "test"}],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[0].overwrite is None

@@ -20,6 +20,7 @@ class ShotSpec:
     viewport: dict[str, int] | None = None  # width/height/scale
     full_page: bool | None = None
     label: str | None = None  # per-shot label override
+    overwrite: bool | None = None  # skip if output exists (default: False via defaults)
 
 
 @dataclass
@@ -66,6 +67,7 @@ def _parse_shot(s: dict[str, Any], ctx: str) -> ShotSpec:
         viewport={k: int(v) for k, v in viewport.items()} if viewport else None,
         full_page=bool(s["full_page"]) if "full_page" in s else None,
         label=str(s["label"]).strip().replace("\\n", "\n") if s.get("label") else None,
+        overwrite=bool(s["overwrite"]) if "overwrite" in s else None,
     )
 
 
