@@ -7,7 +7,7 @@ package = true
 
 [project]
 name = "shots"
-version = "0.2.0"
+version = "0.2.1"
 description = "LLM-assisted high-res marketing screenshots for SaaS apps (generic login via Playwright storage_state)."
 readme = "README.md"
 requires-python = ">=3.10"
