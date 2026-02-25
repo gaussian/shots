@@ -9,6 +9,7 @@ import pytest
 
 from shots.config import (
     RunConfig,
+    ShotGroup,
     ShotSpec,
     _require_str,
     load_config,
@@ -47,11 +48,11 @@ class TestLoadConfigJson:
         assert isinstance(cfg, RunConfig)
         assert cfg.base_url == "https://example.com"
         assert cfg.start == "/app"
-        assert len(cfg.shots) == 2
+        assert len(cfg.groups) == 2
 
     def test_shot_specs_parsed_correctly(self, valid_config_json):
         cfg = load_config(str(valid_config_json))
-        shot = cfg.shots[0]
+        shot = cfg.groups[0].shots[0]
         assert shot.id == "dashboard"
         assert shot.description == "Capture the main dashboard"
         assert shot.url == "/app/dashboard"
@@ -66,7 +67,7 @@ class TestLoadConfigYaml:
     def test_loads_valid_yaml(self, valid_config_yaml):
         cfg = load_config(str(valid_config_yaml))
         assert cfg.base_url == "https://example.com"
-        assert len(cfg.shots) == 2
+        assert len(cfg.groups) == 2
 
 
 class TestLoadConfigValidation:
@@ -147,7 +148,7 @@ class TestShotSpecViewport:
         path = tmp_path / "config.json"
         path.write_text(json.dumps(config))
         cfg = load_config(str(path))
-        assert cfg.shots[0].viewport == {"width": 1920, "height": 1080, "scale": 2}
+        assert cfg.groups[0].shots[0].viewport == {"width": 1920, "height": 1080, "scale": 2}
 
     def test_viewport_preset_parsed(self, tmp_path):
         config: dict[str, Any] = {
@@ -163,7 +164,7 @@ class TestShotSpecViewport:
         path = tmp_path / "config.json"
         path.write_text(json.dumps(config))
         cfg = load_config(str(path))
-        assert cfg.shots[0].viewport_preset == "mobile"
+        assert cfg.groups[0].shots[0].viewport_preset == "mobile"
 
     def test_full_page_parsed(self, tmp_path):
         config: dict[str, Any] = {
@@ -179,7 +180,7 @@ class TestShotSpecViewport:
         path = tmp_path / "config.json"
         path.write_text(json.dumps(config))
         cfg = load_config(str(path))
-        assert cfg.shots[0].full_page is False
+        assert cfg.groups[0].shots[0].full_page is False
 
 
 class TestShotSpec:
@@ -207,16 +208,16 @@ class TestShotSpec:
 
 class TestRunConfig:
     def test_run_config_creation(self):
-        shots = [ShotSpec(id="test", description="Test")]
+        groups = [ShotGroup(id="test", shots=[ShotSpec(id="test", description="Test")])]
         config = RunConfig(
             base_url="https://example.com",
             start="/app",
             defaults={"viewport_preset": "desktop"},
-            shots=shots,
+            groups=groups,
         )
         assert config.base_url == "https://example.com"
         assert config.start == "/app"
-        assert len(config.shots) == 1
+        assert len(config.groups) == 1
 
 
 class TestLoadConfigDefaults:
