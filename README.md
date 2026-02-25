@@ -49,6 +49,7 @@ shots run-config --config shots.yaml --use-llm --use-llm-crop --save-source
 | `--use-llm-crop` | off | LLM picks a marketing-friendly crop rectangle |
 | `--max-crop-retries` | `2` | Crop validation retry attempts |
 | `--save-source` | off | Save uncropped source images alongside output |
+| `--overwrite` | off | Force re-capture of all shots, ignoring per-shot `overwrite` settings |
 | `--timeout-ms` | `10000` | Page-load / navigation timeout |
 | `--action-timeout-ms` | `5000` | Timeout for clicks/typing (fail fast) |
 | `--headed` | off | Show the browser window (debug) |
@@ -132,6 +133,7 @@ groups:
 | `defaults.viewport_preset` | top | `desktop` \| `laptop` \| `tablet` \| `mobile` |
 | `defaults.full_page` | top | Capture full scrollable page |
 | `defaults.max_nav_steps` | top | Max LLM navigation steps per shot (default: `12`) |
+| `defaults.overwrite` | top | Default overwrite behavior for all shots (default: `false`) |
 | `shots` | top | Flat list of shots (cannot coexist with `groups`) |
 | `groups` | top | List of shot groups (cannot coexist with `shots`) |
 | `groups[].id` | group | (required) Group identifier |
@@ -146,6 +148,7 @@ groups:
 | `viewport` | shot | Custom `{width, height, scale}` |
 | `full_page` | shot | Override full-page capture for this shot |
 | `label` | shot | Per-shot label override |
+| `overwrite` | shot | If `false` (default), skip when output PNG already exists |
 
 ## Notes
 

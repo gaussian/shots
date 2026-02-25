@@ -241,6 +241,7 @@ def run_config(
     use_llm_crop: bool,
     max_crop_retries: int = 2,
     save_source: bool,
+    overwrite_all: bool = False,
     cli_fallback_viewport: Viewport,
 ) -> pathlib.Path:
     """
@@ -287,6 +288,20 @@ def run_config(
             for shot in group.shots:
                 shot_counter += 1
                 log.info("--- shot %d/%d: %s ---", shot_counter, total_shots, shot.id)
+
+                # Check if we can skip this shot
+                shot_png_path = group_dir / f"{safe_filename(shot.id)}.png"
+                effective_overwrite = shot.overwrite if shot.overwrite is not None else bool(cfg.defaults.get("overwrite", False))
+                if overwrite_all:
+                    effective_overwrite = True
+
+                if not effective_overwrite and shot_png_path.exists():
+                    log.info("[SKIP] %s -> %s (already exists)", shot.id, shot_png_path)
+                    print(f"[SKIP] {shot.id} -> {shot_png_path} (already exists)")
+                    group_report["shots"].append({"id": shot.id, "status": "skipped", "output": str(shot_png_path)})
+                    group_pngs.append(shot_png_path.read_bytes())
+                    continue
+
                 vp = _resolve_viewport_for_shot(cfg.defaults, shot, cli_fallback_viewport)
 
                 context = browser.new_context(
@@ -477,7 +492,6 @@ def run_config(
                         log.info("added label: %s", label_text.replace("\n", " | "))
 
                     # Save individual shot PNG
-                    shot_png_path = group_dir / f"{safe_filename(shot.id)}.png"
                     shot_png_path.write_bytes(out_bytes)
                     group_pngs.append(out_bytes)
 
