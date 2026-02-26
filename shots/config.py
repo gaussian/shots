@@ -16,6 +16,7 @@ class ShotSpec:
     id: str
     description: str
     url: str | None = None  # absolute or relative
+    continue_from_prev: bool = False  # reuse browser page from previous shot in group
     viewport_preset: str | None = None
     viewport: dict[str, int] | None = None  # width/height/scale
     full_page: bool | None = None
@@ -63,6 +64,7 @@ def _parse_shot(s: dict[str, Any], ctx: str) -> ShotSpec:
         id=sid,
         description=desc,
         url=str(s["url"]).strip() if s.get("url") else None,
+        continue_from_prev=bool(s.get("continue", False)),
         viewport_preset=str(s["viewport_preset"]).strip() if s.get("viewport_preset") else None,
         viewport={k: int(v) for k, v in viewport.items()} if viewport else None,
         full_page=bool(s["full_page"]) if "full_page" in s else None,
@@ -121,6 +123,25 @@ def load_config(path: str) -> RunConfig:
 
             shots = [_parse_shot(s, f"groups[{gi}].shots[{si}]") for si, s in enumerate(shots_raw)]
 
+            for si, sh in enumerate(shots):
+                if sh.continue_from_prev:
+                    if si == 0:
+                        raise ValueError(
+                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue cannot be "
+                            f"the first shot in a group."
+                        )
+                    if sh.url is not None:
+                        raise ValueError(
+                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue and url "
+                            f"are mutually exclusive."
+                        )
+                    if sh.viewport or sh.viewport_preset:
+                        raise ValueError(
+                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue shots "
+                            f"cannot override viewport (they inherit from the chain's "
+                            f"starting shot)."
+                        )
+
             if output == "png" and len(shots) > 1:
                 raise ValueError(
                     f"groups[{gi}] ('{gid}'): output='png' requires exactly 1 shot, got {len(shots)}. "
@@ -144,6 +165,11 @@ def load_config(path: str) -> RunConfig:
 
         for si, s in enumerate(shots_raw):
             shot = _parse_shot(s, f"shots[{si}]")
+            if shot.continue_from_prev:
+                raise ValueError(
+                    f"shots[{si}] ('{shot.id}'): continue is only valid inside "
+                    f"a multi-shot group (use 'groups' with output='pdf')."
+                )
             groups.append(ShotGroup(id=shot.id, shots=[shot]))
 
     return RunConfig(base_url=base_url, start=start, defaults=defaults, groups=groups, out_dir=out_dir)
