@@ -282,3 +282,152 @@ class TestShotSpecOverwrite:
         path.write_text(json.dumps(config))
         cfg = load_config(str(path))
         assert cfg.groups[0].shots[0].overwrite is None
+
+
+class TestContinueFromPrev:
+    def test_continue_true_parsed(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page"},
+                        {"id": "b", "description": "second", "continue": True},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[1].continue_from_prev is True
+
+    def test_continue_absent_defaults_false(self):
+        shot = ShotSpec(id="x", description="x")
+        assert shot.continue_from_prev is False
+
+    def test_continue_false_parsed(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page", "continue": False},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[0].continue_from_prev is False
+
+    def test_continue_first_in_group_raises(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "continue": True},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="cannot be the first shot"):
+            load_config(str(path))
+
+    def test_continue_in_flat_shots_raises(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "shots": [
+                {"id": "a", "description": "first", "continue": True},
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="only valid inside a multi-shot group"):
+            load_config(str(path))
+
+    def test_continue_with_url_raises(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page"},
+                        {"id": "b", "description": "second", "continue": True, "url": "/other"},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            load_config(str(path))
+
+    def test_continue_with_viewport_raises(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page"},
+                        {"id": "b", "description": "second", "continue": True, "viewport": {"width": 800, "height": 600}},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="cannot override viewport"):
+            load_config(str(path))
+
+    def test_continue_with_viewport_preset_raises(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page"},
+                        {"id": "b", "description": "second", "continue": True, "viewport_preset": "mobile"},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        with pytest.raises(ValueError, match="cannot override viewport"):
+            load_config(str(path))
+
+    def test_continue_with_full_page_allowed(self, tmp_path):
+        config: dict[str, Any] = {
+            "base_url": "https://example.com",
+            "groups": [
+                {
+                    "id": "g1",
+                    "output": "pdf",
+                    "shots": [
+                        {"id": "a", "description": "first", "url": "/page"},
+                        {"id": "b", "description": "second", "continue": True, "full_page": False},
+                    ],
+                }
+            ],
+        }
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps(config))
+        cfg = load_config(str(path))
+        assert cfg.groups[0].shots[1].full_page is False
