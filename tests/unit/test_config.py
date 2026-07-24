@@ -384,7 +384,12 @@ class TestContinueFromPrev:
                     "output": "pdf",
                     "shots": [
                         {"id": "a", "description": "first", "url": "/page"},
-                        {"id": "b", "description": "second", "continue": True, "viewport": {"width": 800, "height": 600}},
+                        {
+                            "id": "b",
+                            "description": "second",
+                            "continue": True,
+                            "viewport": {"width": 800, "height": 600},
+                        },
                     ],
                 }
             ],

@@ -14,7 +14,7 @@ log = logging.getLogger("shots.llm")
 
 def llm_available() -> bool:
     try:
-        import openai  # noqa: F401
+        import openai
 
         return True
     except Exception:
@@ -87,7 +87,7 @@ def _summarize_failures(history: list[dict[str, Any]]) -> str:
         t = act.get("type", "?")
         parts = [t]
         if act.get("role"):
-            parts.append(f'role={act["role"]}')
+            parts.append(f"role={act['role']}")
         if act.get("name"):
             parts.append(f'name="{act["name"]}"')
         if act.get("text"):
@@ -95,7 +95,7 @@ def _summarize_failures(history: list[dict[str, Any]]) -> str:
         if act.get("selector"):
             parts.append(f'selector="{act["selector"]}"')
         if act.get("url") and t == "goto":
-            parts.append(f'url={act["url"]}')
+            parts.append(f"url={act['url']}")
         err = str(outcome.get("error", ""))[:80]
         lines.append(f"- {' '.join(parts)} → {err}")
     return "\n".join(lines)
@@ -114,10 +114,16 @@ def failed_signatures(history: list[dict[str, Any]]) -> set[tuple]:
         if outcome.get("ok"):
             continue
         act = h.get("action") or {}
-        sigs.add((
-            act.get("type"), act.get("role"), act.get("name"),
-            act.get("text"), act.get("selector"), act.get("url"),
-        ))
+        sigs.add(
+            (
+                act.get("type"),
+                act.get("role"),
+                act.get("name"),
+                act.get("text"),
+                act.get("selector"),
+                act.get("url"),
+            )
+        )
     return sigs
 
 
@@ -260,8 +266,14 @@ def pick_crop(
 
     user_text = f"base_url={base_url}\ncurrent_url={current_url}{rejection_block}"
 
-    log.info("LLM crop request: model=%s url=%s (%dx%d)%s", model, current_url, preview_w, preview_h,
-             " (retry)" if rejection_reason else "")
+    log.info(
+        "LLM crop request: model=%s url=%s (%dx%d)%s",
+        model,
+        current_url,
+        preview_w,
+        preview_h,
+        " (retry)" if rejection_reason else "",
+    )
 
     t0 = time.monotonic()
     resp = client.responses.create(
