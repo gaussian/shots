@@ -1,13 +1,16 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["shots*"]
 
 [tool.uv]
 package = true
 
 [project]
 name = "shots"
-version = "0.2.5"
+version = "0.2.6"
 description = "LLM-assisted high-res marketing screenshots for SaaS apps (generic login via Playwright storage_state)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -50,6 +53,9 @@ ignore = [
   "SIM102",  # nested if (sometimes more readable)
   "SIM105",  # contextlib.suppress (explicit try/except clearer)
   "RUF046",  # unnecessary int() call (explicit is fine)
+  "F401",    # imported-but-unused: side-effect imports / re-exports look unused
+             # (F821 still catches genuinely-missing imports)
+  "F841",    # unused local: intentional in places
 ]
 
 [tool.ruff.lint.per-file-ignores]

@@ -17,7 +17,7 @@ def desensitize_url(url: str, base_url: str = "") -> str:
     """
     # Strip origin to get just the path
     if base_url and url.startswith(base_url):
-        path = url[len(base_url):]
+        path = url[len(base_url) :]
     else:
         parsed = urlparse(url)
         path = parsed.path
