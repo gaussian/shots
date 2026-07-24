@@ -20,7 +20,9 @@ def _add_common_run_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--use-llm-crop", action="store_true", help="Use LLM to choose a crop box.")
     p.add_argument("--max-crop-retries", type=int, default=2, help="Max crop validation retries (default: 2).")
     p.add_argument("--save-source", action="store_true", help="Save uncropped source images too.")
-    p.add_argument("--overwrite", action="store_true", help="Force re-capture of all shots, ignoring per-shot overwrite settings.")
+    p.add_argument(
+        "--overwrite", action="store_true", help="Force re-capture of all shots, ignoring per-shot overwrite settings."
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

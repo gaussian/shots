@@ -82,7 +82,7 @@ def login_manual(base_url: str, out_dir: pathlib.Path, viewport: Viewport) -> pa
             print("4) Return here and press ENTER.\n")
             input("Press ENTER when you are fully logged in... ")
         else:
-            print('4) Click the ▶ (Resume) button in the Playwright inspector when done.\n')
+            print("4) Click the ▶ (Resume) button in the Playwright inspector when done.\n")
             page.pause()
 
         context.storage_state(path=str(state_path))
@@ -172,7 +172,7 @@ def _pick_carry_note(history: list[dict[str, Any]]) -> str:
 def _get_page_context(page: Page, max_items: int = 80) -> str:
     """Extract interactive elements from the page accessibility tree."""
     try:
-        snapshot = page.accessibility.snapshot()
+        snapshot = page.accessibility.snapshot()  # type: ignore[attr-defined]  # valid Playwright API, missing from stubs
     except Exception:
         return ""
     if not snapshot:
@@ -186,13 +186,23 @@ def _get_page_context(page: Page, max_items: int = 80) -> str:
         role = node.get("role", "")
         name = node.get("name", "")
         # Only include interactive/navigable elements
-        if role in ("link", "button", "menuitem", "tab", "checkbox", "radio",
-                     "textbox", "combobox", "searchbox", "option"):
+        if role in (
+            "link",
+            "button",
+            "menuitem",
+            "tab",
+            "checkbox",
+            "radio",
+            "textbox",
+            "combobox",
+            "searchbox",
+            "option",
+        ):
             prefix = "  " * depth
             desc = f'{prefix}{role} "{name}"' if name else f"{prefix}{role}"
             # For links, try to get the URL via the node's value or description
             if role == "link" and node.get("description"):
-                desc += f' ({node["description"]})'
+                desc += f" ({node['description']})"
             lines.append(desc)
         for child in node.get("children", []):
             _walk(child, depth + 1)
@@ -213,7 +223,7 @@ def _get_page_context(page: Page, max_items: int = 80) -> str:
                 text = link.get("text", "").replace("\n", " ").strip()
                 href = link.get("href", "")
                 label = f'  "{text}"' if text else "  (no text)"
-                lines.append(f'{label} href={href}')
+                lines.append(f"{label} href={href}")
     except Exception:
         pass
 
@@ -252,8 +262,7 @@ def _format_accumulated_goal(descriptions: list[str]) -> str:
     return (
         "This is a multi-step screenshot session. Previous steps have already "
         "been executed and the browser is in the state they left it. Focus on "
-        "the CURRENT GOAL.\n\n"
-        + "\n\n".join(parts)
+        "the CURRENT GOAL.\n\n" + "\n\n".join(parts)
     )
 
 
@@ -293,8 +302,16 @@ def run_config(
         raise RuntimeError(f"Missing {state_path}. Run: shots login --base-url {cfg.base_url} --out-dir {out_dir}")
 
     total_shots = sum(len(g.shots) for g in cfg.groups)
-    log.info("run_config: base_url=%s groups=%d shots=%d use_llm=%s model=%s timeout=%dms action_timeout=%dms",
-             cfg.base_url, len(cfg.groups), total_shots, use_llm, model, timeout_ms, action_timeout_ms)
+    log.info(
+        "run_config: base_url=%s groups=%d shots=%d use_llm=%s model=%s timeout=%dms action_timeout=%dms",
+        cfg.base_url,
+        len(cfg.groups),
+        total_shots,
+        use_llm,
+        model,
+        timeout_ms,
+        action_timeout_ms,
+    )
 
     client = None
     if use_llm:
@@ -326,12 +343,14 @@ def run_config(
 
             for chain in chains:
                 # Check if the entire chain can be skipped
+                # Safe: invoked immediately below within the same iteration, so the
+                # loop variables hold their current values (B023 is a false positive).
                 def _shot_needs_run(idx: int) -> bool:
-                    s = group.shots[idx]
+                    s = group.shots[idx]  # noqa: B023
                     eff = s.overwrite if s.overwrite is not None else bool(cfg.defaults.get("overwrite", False))
                     if overwrite_all:
                         eff = True
-                    return eff or not (group_dir / f"{safe_filename(s.id)}.png").exists()
+                    return eff or not (group_dir / f"{safe_filename(s.id)}.png").exists()  # noqa: B023
 
                 chain_needs_run = any(_shot_needs_run(idx) for idx in chain)
 
@@ -370,11 +389,15 @@ def run_config(
                             break
 
                         shot = group.shots[shot_idx]
-                        is_first = (ci == 0)
+                        is_first = ci == 0
                         shot_counter += 1
-                        log.info("--- shot %d/%d: %s%s ---",
-                                 shot_counter, total_shots, shot.id,
-                                 " (continue)" if shot.continue_from_prev else "")
+                        log.info(
+                            "--- shot %d/%d: %s%s ---",
+                            shot_counter,
+                            total_shots,
+                            shot.id,
+                            " (continue)" if shot.continue_from_prev else "",
+                        )
 
                         shot_png_path = group_dir / f"{safe_filename(shot.id)}.png"
                         needs_save = _shot_needs_run(shot_idx)
@@ -403,7 +426,9 @@ def run_config(
                             max_steps = int(cfg.defaults.get("max_nav_steps", 12))
 
                             if not use_llm and is_first and not shot.url:
-                                raise RuntimeError("Shot has no url and --use-llm is false; cannot acquire from description.")
+                                raise RuntimeError(
+                                    "Shot has no url and --use-llm is false; cannot acquire from description."
+                                )
                             if not use_llm and not is_first:
                                 raise RuntimeError("Continue shots require --use-llm.")
 
@@ -420,7 +445,7 @@ def run_config(
                                     acquired = True
                                     break
 
-                                from .llm import next_action_for_shot, _action_signature, failed_signatures
+                                from .llm import _action_signature, failed_signatures, next_action_for_shot
 
                                 page_ctx = _get_page_context(page)
                                 log.debug("page_context:\n%s", page_ctx)
@@ -443,7 +468,12 @@ def run_config(
 
                                 sig = _action_signature(action)
                                 if sig in prev_failed and action.type not in ("done", "fail", "wait", "scroll"):
-                                    log.warning("step %d/%d: LLM repeated a failed action (%s), re-querying", step_i, max_steps, action.type)
+                                    log.warning(
+                                        "step %d/%d: LLM repeated a failed action (%s), re-querying",
+                                        step_i,
+                                        max_steps,
+                                        action.type,
+                                    )
                                     action = next_action_for_shot(
                                         client=client,
                                         model=model,
@@ -457,10 +487,24 @@ def run_config(
                                         page_context=page_ctx,
                                     )
 
-                                log.info("step %d/%d: executing action type=%s reason=%s", step_i, max_steps, action.type, action.reason[:80] if action.reason else "")
+                                log.info(
+                                    "step %d/%d: executing action type=%s reason=%s",
+                                    step_i,
+                                    max_steps,
+                                    action.type,
+                                    action.reason[:80] if action.reason else "",
+                                )
                                 url_before = page.url
-                                outcome = _execute_action(page, action, timeout_ms=action_timeout_ms, nav_timeout_ms=timeout_ms)
-                                log.info("step %d/%d: action result ok=%s error=%s", step_i, max_steps, outcome.ok, outcome.error or "")
+                                outcome = _execute_action(
+                                    page, action, timeout_ms=action_timeout_ms, nav_timeout_ms=timeout_ms
+                                )
+                                log.info(
+                                    "step %d/%d: action result ok=%s error=%s",
+                                    step_i,
+                                    max_steps,
+                                    outcome.ok,
+                                    outcome.error or "",
+                                )
                                 wait_until_stable(page, timeout_ms=timeout_ms)
 
                                 chain_history.append(
@@ -494,9 +538,15 @@ def run_config(
 
                             if not needs_save:
                                 # Navigation ran to keep chain state, but screenshot already exists
-                                log.info("[SKIP] %s -> %s (already exists, navigation ran for chain continuity)", shot.id, shot_png_path)
+                                log.info(
+                                    "[SKIP] %s -> %s (already exists, navigation ran for chain continuity)",
+                                    shot.id,
+                                    shot_png_path,
+                                )
                                 print(f"[SKIP] {shot.id} -> {shot_png_path} (already exists)")
-                                group_report["shots"].append({"id": shot.id, "status": "skipped", "output": str(shot_png_path)})
+                                group_report["shots"].append(
+                                    {"id": shot.id, "status": "skipped", "output": str(shot_png_path)}
+                                )
                                 group_pngs.append(shot_png_path.read_bytes())
                                 continue
 
@@ -515,8 +565,17 @@ def run_config(
 
                                 log.info("requesting LLM crop")
                                 full_w, full_h = get_png_size(final_source)
-                                preview_bytes, preview_w, preview_h, scale_factor = downscale_png(final_source, max_w=1280)
-                                log.info("crop preview: %dx%d (scale=%.3f from %dx%d)", preview_w, preview_h, scale_factor, full_w, full_h)
+                                preview_bytes, preview_w, preview_h, scale_factor = downscale_png(
+                                    final_source, max_w=1280
+                                )
+                                log.info(
+                                    "crop preview: %dx%d (scale=%.3f from %dx%d)",
+                                    preview_w,
+                                    preview_h,
+                                    scale_factor,
+                                    full_w,
+                                    full_h,
+                                )
 
                                 rejection_reason = ""
                                 for crop_attempt in range(1, max_crop_retries + 1):
@@ -539,9 +598,12 @@ def run_config(
                                     if scale_factor < 1.0:
                                         inv = 1.0 / scale_factor
                                         fx, fy, fw, fh = clamp_crop(
-                                            int(crop.x * inv), int(crop.y * inv),
-                                            int(crop.w * inv), int(crop.h * inv),
-                                            full_w, full_h,
+                                            int(crop.x * inv),
+                                            int(crop.y * inv),
+                                            int(crop.w * inv),
+                                            int(crop.h * inv),
+                                            full_w,
+                                            full_h,
                                         )
                                     else:
                                         fx, fy, fw, fh = clamp_crop(crop.x, crop.y, crop.w, crop.h, full_w, full_h)
@@ -567,13 +629,17 @@ def run_config(
                             # Apply label if configured
                             label_template = shot.label or group.label
                             if label_template:
-                                label_text = render_label(label_template, {
-                                    "url": desensitize_url(final_url, cfg.base_url),
-                                    "id": shot.id,
-                                    "title": shot.description.strip()[:80],
-                                })
+                                label_text = render_label(
+                                    label_template,
+                                    {
+                                        "url": desensitize_url(final_url, cfg.base_url),
+                                        "id": shot.id,
+                                        "title": shot.description.strip()[:80],
+                                    },
+                                )
                                 if group.label_date:
                                     from datetime import datetime, timezone
+
                                     label_text += "\n" + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                                 out_bytes = add_label_banner(out_bytes, label_text)
                                 log.info("added label: %s", label_text.replace("\n", " | "))
@@ -588,7 +654,12 @@ def run_config(
                                     "status": "ok",
                                     "output": str(shot_png_path),
                                     "final_url": final_url,
-                                    "viewport": {"width": chain_vp.width, "height": chain_vp.height, "scale": chain_vp.scale, "full_page": shot_full_page},
+                                    "viewport": {
+                                        "width": chain_vp.width,
+                                        "height": chain_vp.height,
+                                        "scale": chain_vp.scale,
+                                        "full_page": shot_full_page,
+                                    },
                                     "history_tail": chain_history[-25:],
                                 }
                             )
@@ -598,7 +669,15 @@ def run_config(
 
                         except Exception as e:
                             log.error("[ERROR] %s: %s", shot.id, e)
-                            group_report["shots"].append({"id": shot.id, "status": "error", "error": str(e), "final_url": final_url, "history_tail": chain_history[-25:]})
+                            group_report["shots"].append(
+                                {
+                                    "id": shot.id,
+                                    "status": "error",
+                                    "error": str(e),
+                                    "final_url": final_url,
+                                    "history_tail": chain_history[-25:],
+                                }
+                            )
                             print(f"[ERROR] {shot.id}: {e}")
                             group_ok = False
                             chain_broken = True

@@ -79,7 +79,7 @@ def _get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in candidates:
         try:
             return ImageFont.truetype(path, size)
-        except (OSError, IOError):
+        except OSError:
             continue
     return ImageFont.load_default(size=size)
 
@@ -119,7 +119,9 @@ def add_label_banner(png_bytes: bytes, label_text: str, font_size: int = 32) -> 
     text_w = text_bbox[2] - text_bbox[0]
     text_x = (w - text_w) // 2
     text_y = h + line_thickness + padding
-    draw.multiline_text((text_x, text_y), label_text, fill=(0, 0, 0, 255), font=font, align="center", spacing=line_spacing)
+    draw.multiline_text(
+        (text_x, text_y), label_text, fill=(0, 0, 0, 255), font=font, align="center", spacing=line_spacing
+    )
 
     buf = BytesIO()
     out.save(buf, format="PNG")

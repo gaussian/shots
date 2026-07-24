@@ -127,13 +127,11 @@ def load_config(path: str) -> RunConfig:
                 if sh.continue_from_prev:
                     if si == 0:
                         raise ValueError(
-                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue cannot be "
-                            f"the first shot in a group."
+                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue cannot be the first shot in a group."
                         )
                     if sh.url is not None:
                         raise ValueError(
-                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue and url "
-                            f"are mutually exclusive."
+                            f"groups[{gi}].shots[{si}] ('{sh.id}'): continue and url are mutually exclusive."
                         )
                     if sh.viewport or sh.viewport_preset:
                         raise ValueError(
@@ -148,14 +146,16 @@ def load_config(path: str) -> RunConfig:
                     "Use output='pdf' for multi-shot groups."
                 )
 
-            groups.append(ShotGroup(
-                id=gid,
-                shots=shots,
-                output=output,
-                label=str(g["label"]).strip().replace("\\n", "\n") if g.get("label") else None,
-                label_date=bool(g.get("label_date", False)),
-                folder=str(g["folder"]).strip() if g.get("folder") else None,
-            ))
+            groups.append(
+                ShotGroup(
+                    id=gid,
+                    shots=shots,
+                    output=output,
+                    label=str(g["label"]).strip().replace("\\n", "\n") if g.get("label") else None,
+                    label_date=bool(g.get("label_date", False)),
+                    folder=str(g["folder"]).strip() if g.get("folder") else None,
+                )
+            )
 
     else:
         # Flat shots list — auto-wrap each into its own group
