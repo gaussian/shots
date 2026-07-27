@@ -22,7 +22,7 @@ jobs:
     steps:
 
       - name: Check out code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: develop
           fetch-depth: 0 # otherwise, there would be errors pushing refs to the destination repository.
