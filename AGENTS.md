@@ -9,6 +9,7 @@ published to PyPI.
 - Lint + format: `uv run --all-extras ruff check .` and `ruff format --check .`
 - Types: `uv run --all-extras mypy shots --ignore-missing-imports`
 - Default working branch: `develop`. Releases flow `develop` → `main`.
+- Dependency cooldown: 7 days, via `exclude-newer` under `[tool.uv]` in `pyproject.toml`. Urgent fix: add `<pkg> = false` under `exclude-newer-package`, run `uv lock --upgrade-package <pkg>`, and remove the exemption once the release is over 7 days old.
 
 ## Git
 
